@@ -1,250 +1,643 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, TextInput, ScrollView, TouchableOpacity,
-  StyleSheet, RefreshControl, FlatList, ActivityIndicator,
+  StyleSheet, RefreshControl, ActivityIndicator,
+  Dimensions, FlatList, Animated, Easing, ViewToken,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
-import { getNearbyShops, searchProducts } from '../services/api';
-import { colors } from '../theme';
+import * as Location from 'expo-location';
+import { getNearbyShops } from '../services/api';
 
+const { width: W } = Dimensions.get('window');
+
+// ─── DATA ────────────────────────────────────────────────────────
 const CATEGORIES = [
-  { id: 'all', label: 'All', emoji: '🏪' },
-  { id: 'grocery', label: 'Grocery', emoji: '🥦' },
-  { id: 'dairy', label: 'Dairy', emoji: '🥛' },
-  { id: 'snacks', label: 'Snacks', emoji: '🍿' },
-  { id: 'beverages', label: 'Drinks', emoji: '🧃' },
-  { id: 'personal_care', label: 'Care', emoji: '🧴' },
+  { id:'all',           label:'All',        emoji:'🏪' },
+  { id:'grocery',       label:'Grocery',    emoji:'🥦' },
+  { id:'dairy',         label:'Dairy',      emoji:'🥛' },
+  { id:'snacks',        label:'Snacks',     emoji:'🍿' },
+  { id:'beverages',     label:'Drinks',     emoji:'🧃' },
+  { id:'personal_care', label:'Care',       emoji:'🧴' },
+  { id:'pharmacy',      label:'Medicine',   emoji:'💊' },
+  { id:'bakery',        label:'Bakery',     emoji:'🍞' },
+  { id:'household',     label:'Home',       emoji:'🧹' },
+];
+
+const BANNERS = [
+  { id:1, title:'⚡ Under 20 Minutes',  sub:'Express delivery from your local shop', color1:'#FF8A00', color2:'#FF5C00', emoji:'🛵', badge:'NEW' },
+  { id:2, title:'🎁 First Order Free',  sub:'No delivery fee on your first order',   color1:'#7C3AED', color2:'#6D28D9', emoji:'🎉', badge:'OFFER' },
+  { id:3, title:'🏪 Support Local',      sub:'100% revenue goes to neighbourhood shops', color1:'#0F766E', color2:'#0D9488', emoji:'❤️', badge:'MISSION' },
+  { id:4, title:'⭐ QuickPass ₹99/mo',  sub:'Unlimited free delivery, every day',    color1:'#0B1A2B', color2:'#1C3A5E', emoji:'✨', badge:'SAVE' },
+];
+
+const COLLECTIONS = [
+  { id:'breakfast', label:'Breakfast Essentials', emoji:'🍳', count:24, color:'#FFF4E6' },
+  { id:'evening',   label:'Evening Snacks',        emoji:'🍿', count:18, color:'#F0FDF4' },
+  { id:'cleaning',  label:'Cleaning Supplies',     emoji:'🧹', count:31, color:'#EFF6FF' },
+  { id:'baby',      label:'Baby & Kids',            emoji:'👶', count:15, color:'#FDF4FF' },
+];
+
+const OFFERS = [
+  { id:1, title:'20% OFF',  sub:'On first Grocery order', code:'FIRST20', color:'#FF8A00' },
+  { id:2, title:'FREE',     sub:'Delivery above ₹199',    code:'AUTO',    color:'#22C55E' },
+  { id:3, title:'₹50 OFF',  sub:'On orders above ₹299',   code:'SAVE50',  color:'#8B5CF6' },
 ];
 
 const MOCK_SHOPS = [
-  { id: '1', name: 'Raju General Store', category: 'grocery', distance: '0.3 km',
-    eta: '8 min', rating: 4.8, reviews: 124, is_open: true,
-    tags: ['Grocery', 'Snacks', 'Dairy'] },
-  { id: '2', name: 'Krishna Medicals', category: 'pharmacy', distance: '0.5 km',
-    eta: '12 min', rating: 4.6, reviews: 89, is_open: true,
-    tags: ['Medicine', 'Personal Care'] },
-  { id: '3', name: 'Lakshmi Provisions', category: 'grocery', distance: '0.8 km',
-    eta: '15 min', rating: 4.7, reviews: 210, is_open: false,
-    tags: ['Grocery', 'Pulses', 'Spices'] },
-  { id: '4', name: 'Cool Drinks Corner', category: 'beverages', distance: '0.4 km',
-    eta: '10 min', rating: 4.5, reviews: 67, is_open: true,
-    tags: ['Beverages', 'Ice cream', 'Snacks'] },
+  { id:'341e69d3', name:'Raju General Store',   category:'grocery',   distance:'0.3 km', eta:'8 min',  rating:4.8, reviews:124, is_open:true,  tags:['Grocery','Snacks','Dairy'] },
+  { id:'shop-002', name:'Krishna Medicals',      category:'pharmacy',  distance:'0.5 km', eta:'10 min', rating:4.6, reviews:89,  is_open:true,  tags:['Medicine','Personal Care'] },
+  { id:'shop-003', name:'Lakshmi Provisions',    category:'grocery',   distance:'0.8 km', eta:'15 min', rating:4.7, reviews:210, is_open:false, tags:['Grocery','Pulses','Spices'] },
+  { id:'shop-004', name:'Cool Drinks Corner',    category:'beverages', distance:'0.4 km', eta:'9 min',  rating:4.5, reviews:67,  is_open:true,  tags:['Beverages','Ice Cream'] },
+  { id:'shop-005', name:'Anand Bakery',          category:'bakery',    distance:'0.6 km', eta:'11 min', rating:4.9, reviews:302, is_open:true,  tags:['Bakery','Cakes','Bread'] },
 ];
 
+const MOCK_PRODUCTS: Record<string, any[]> = {
+  grocery: [
+    { id:'g1', name:'Tata Salt 1kg',          price:22,  shop:'Raju General Store', eta:'8 min',  emoji:'🧂', badge:'' },
+    { id:'g2', name:'Fortune Sunflower Oil 1L',price:145, shop:'Raju General Store', eta:'8 min',  emoji:'🫒', badge:'BESTSELLER' },
+    { id:'g3', name:'Aashirvaad Atta 5kg',     price:280, shop:'Lakshmi Provisions', eta:'15 min', emoji:'🌾', badge:'' },
+    { id:'g4', name:'Toor Dal 1kg',            price:140, shop:'Lakshmi Provisions', eta:'15 min', emoji:'🫘', badge:'20% OFF' },
+    { id:'g5', name:'Basmati Rice 5kg',        price:350, shop:'Raju General Store', eta:'8 min',  emoji:'🍚', badge:'' },
+    { id:'g6', name:'Sugar 1kg',               price:45,  shop:'Raju General Store', eta:'8 min',  emoji:'🍬', badge:'' },
+  ],
+  dairy: [
+    { id:'d1', name:'Amul Milk 500ml',         price:28,  shop:'Raju General Store', eta:'8 min',  emoji:'🥛', badge:'FRESH' },
+    { id:'d2', name:'Amul Butter 100g',        price:56,  shop:'Raju General Store', eta:'8 min',  emoji:'🧈', badge:'' },
+    { id:'d3', name:'Mother Dairy Curd 400g',  price:38,  shop:'Raju General Store', eta:'8 min',  emoji:'🥣', badge:'' },
+    { id:'d4', name:'Amul Cheese Slices',      price:125, shop:'Raju General Store', eta:'8 min',  emoji:'🧀', badge:'' },
+  ],
+  snacks: [
+    { id:'s1', name:'Lays Classic 90g',        price:20,  shop:'Raju General Store', eta:'8 min',  emoji:'🍿', badge:'' },
+    { id:'s2', name:'Maggi Noodles 4pk',       price:60,  shop:'Raju General Store', eta:'8 min',  emoji:'🍜', badge:'POPULAR' },
+    { id:'s3', name:'Parle-G 500g',            price:35,  shop:'Raju General Store', eta:'8 min',  emoji:'🍪', badge:'' },
+    { id:'s4', name:'Kurkure Masala 90g',      price:20,  shop:'Cool Drinks Corner', eta:'9 min',  emoji:'🌽', badge:'' },
+  ],
+  beverages: [
+    { id:'b1', name:'Tropicana Orange 1L',     price:85,  shop:'Cool Drinks Corner', eta:'9 min',  emoji:'🧃', badge:'' },
+    { id:'b2', name:'Coca Cola 750ml',         price:42,  shop:'Cool Drinks Corner', eta:'9 min',  emoji:'🥤', badge:'' },
+    { id:'b3', name:'Red Bull 250ml',          price:125, shop:'Cool Drinks Corner', eta:'9 min',  emoji:'⚡', badge:'ENERGY' },
+    { id:'b4', name:'Minute Maid Pulpy',       price:30,  shop:'Cool Drinks Corner', eta:'9 min',  emoji:'🍊', badge:'' },
+  ],
+  personal_care: [
+    { id:'p1', name:'Colgate MaxFresh 150g',   price:65,  shop:'Krishna Medicals',   eta:'10 min', emoji:'🪥', badge:'' },
+    { id:'p2', name:'Dove Shampoo 180ml',      price:175, shop:'Krishna Medicals',   eta:'10 min', emoji:'🧴', badge:'' },
+    { id:'p3', name:'Dettol Soap 75g',         price:35,  shop:'Krishna Medicals',   eta:'10 min', emoji:'🧼', badge:'' },
+    { id:'p4', name:'Parachute Coconut Oil',   price:95,  shop:'Krishna Medicals',   eta:'10 min', emoji:'💆', badge:'POPULAR' },
+  ],
+  pharmacy: [
+    { id:'m1', name:'Dolo 650 Strip',          price:30,  shop:'Krishna Medicals',   eta:'10 min', emoji:'💊', badge:'' },
+    { id:'m2', name:'Betadine 30ml',           price:65,  shop:'Krishna Medicals',   eta:'10 min', emoji:'🩹', badge:'' },
+    { id:'m3', name:'Vicks VapoRub 50g',       price:90,  shop:'Krishna Medicals',   eta:'10 min', emoji:'🫁', badge:'' },
+  ],
+  bakery: [
+    { id:'bk1', name:'Britannia Bread 400g',   price:42,  shop:'Anand Bakery',       eta:'11 min', emoji:'🍞', badge:'FRESH' },
+    { id:'bk2', name:'Chocolate Cake Slice',   price:65,  shop:'Anand Bakery',       eta:'11 min', emoji:'🍰', badge:'' },
+    { id:'bk3', name:'Croissant',              price:35,  shop:'Anand Bakery',       eta:'11 min', emoji:'🥐', badge:'FRESH' },
+    { id:'bk4', name:'Pav (6 pcs)',            price:25,  shop:'Anand Bakery',       eta:'11 min', emoji:'🥖', badge:'' },
+  ],
+  household: [
+    { id:'h1', name:'Surf Excel 500g',         price:78,  shop:'Raju General Store', eta:'8 min',  emoji:'🧺', badge:'' },
+    { id:'h2', name:'Harpic Toilet Cleaner',   price:95,  shop:'Raju General Store', eta:'8 min',  emoji:'🚽', badge:'' },
+    { id:'h3', name:'Colin Glass Cleaner',     price:85,  shop:'Raju General Store', eta:'8 min',  emoji:'🪟', badge:'' },
+  ],
+};
+
+// ─── COMPONENT ──────────────────────────────────────────────────
 export default function HomeScreen({ navigation }: any) {
-  const [search, setSearch]     = useState('');
-  const [category, setCategory] = useState('all');
-  const [shops, setShops]       = useState(MOCK_SHOPS);
-  const [refreshing, setRefreshing] = useState(false);
-  const [loading, setLoading]   = useState(false);
+  const [search, setSearch]           = useState('');
+  const [category, setCategory]       = useState('all');
+  const [shops, setShops]             = useState<any[]>([]);
+  const [loading, setLoading]         = useState(true);
+  const [refreshing, setRefreshing]   = useState(false);
+  const [products, setProducts]         = useState<any[]>([]);
+  const [locationName, setLocationName] = useState('Detecting...');
+  const [bannerIdx, setBannerIdx]     = useState(0);
+  const bannerRef = useRef<FlatList<typeof BANNERS[0]>>(null);
+  const bannerTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const onRefresh = async () => {
-    setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 1000);
-  };
+  // ── Auto-scroll banners
+  useEffect(() => {
+    bannerTimer.current = setInterval(() => {
+      setBannerIdx(i => {
+        const next = (i + 1) % BANNERS.length;
+        bannerRef.current?.scrollToIndex({ index: next, animated: true });
+        return next;
+      });
+    }, 3500);
+    return () => { if (bannerTimer.current) clearInterval(bannerTimer.current); };
+  }, []);
 
-  const filtered = shops.filter(s =>
-    (category === 'all' || s.category === category) &&
-    (search === '' || s.name.toLowerCase().includes(search.toLowerCase()))
-  );
+  // ── Fetch shops
+  const fetchShops = useCallback(async (isRefresh = false) => {
+    if (isRefresh) setRefreshing(true); else setLoading(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      let lat = 12.9116, lng = 77.6389;
+      if (status === 'granted') {
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        lat = loc.coords.latitude; lng = loc.coords.longitude;
+        const geo = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
+        if (geo[0]) setLocationName(`${geo[0].district || geo[0].subregion || 'Your area'}, ${geo[0].city || ''}`);
+      } else { setLocationName('HSR Layout, Bengaluru'); }
+      const res = await getNearbyShops(lat, lng, 5000);
+      const list = res.data?.shops || res.data || [];
+      setShops(Array.isArray(list) && list.length > 0
+        ? list.map((s: any) => ({
+            id: s.id, name: s.name, category: s.category || 'grocery',
+            distance: s.distance_km ? `${parseFloat(s.distance_km).toFixed(1)} km` : '—',
+            eta: s.distance_km ? `${Math.ceil(parseFloat(s.distance_km) * 4 + 5)} min` : '—',
+            rating: s.rating || 4.5, reviews: s.total_reviews || 0,
+            is_open: s.is_open, tags: s.tags || [s.category || 'General'],
+          }))
+        : MOCK_SHOPS
+      );
+    } catch { setShops(MOCK_SHOPS); setLocationName('HSR Layout, Bengaluru'); }
+    finally { setLoading(false); setRefreshing(false); }
+  }, []);
+
+  useEffect(() => { fetchShops(); }, [fetchShops]);
+
+  const filtered = shops.filter(s => {
+    const matchSearch = !search || s.name.toLowerCase().includes(search.toLowerCase());
+    if (category === 'all') return matchSearch;
+    // Match by category field OR by tags array
+    const catLabel = CATEGORIES.find(c => c.id === category)?.label?.toLowerCase() || '';
+    const matchCat = s.category === category ||
+      (s.tags || []).some((t: string) =>
+        t.toLowerCase() === category ||
+        t.toLowerCase() === catLabel
+      );
+    return matchCat && matchSearch;
+  });
 
   return (
-    <View style={styles.container}>
-      <StatusBar style="dark" />
+    <View style={s.root}>
+      <StatusBar style="light" />
 
-      {/* Header */}
-      <LinearGradient colors={['#FF8A00', '#FF5C00']} style={styles.header}>
-        <View style={styles.headerTop}>
-          <View>
-            <View style={styles.locationRow}>
-              <Ionicons name="location-sharp" size={16} color="rgba(255,255,255,0.9)" />
-              <Text style={styles.locationLabel}>Delivering to</Text>
+      {/* ── STICKY HEADER ── */}
+      <LinearGradient colors={['#FF8A00','#FF5C00']} style={s.header}>
+        <View style={s.hTop}>
+          <TouchableOpacity style={s.locationWrap} activeOpacity={0.7}>
+            <View style={s.locationRow}>
+              <Ionicons name="location-sharp" size={14} color="rgba(255,255,255,0.9)" />
+              <Text style={s.locationLbl}>Delivering to</Text>
+              <Ionicons name="chevron-down" size={13} color="rgba(255,255,255,0.8)" />
             </View>
-            <TouchableOpacity style={styles.locationBtn}>
-              <Text style={styles.locationText}>HSR Layout, Bengaluru</Text>
-              <Ionicons name="chevron-down" size={16} color="#fff" />
+            <Text style={s.locationTxt} numberOfLines={1}>{locationName}</Text>
+          </TouchableOpacity>
+
+          <View style={s.hActions}>
+            <TouchableOpacity style={s.hBtn}>
+              <Ionicons name="notifications-outline" size={22} color="#fff" />
+              <View style={s.notifDot} />
+            </TouchableOpacity>
+            <TouchableOpacity style={s.hBtn} onPress={() => navigation.navigate('Profile')}>
+              <View style={s.avatarSmall}>
+                <Ionicons name="person" size={18} color="#FF8A00" />
+              </View>
             </TouchableOpacity>
           </View>
-          <TouchableOpacity
-            style={styles.profileBtn}
-            onPress={() => navigation.navigate('Profile')}
-          >
-            <Text style={styles.profileEmoji}>👤</Text>
-          </TouchableOpacity>
         </View>
 
-        {/* Search */}
-        <View style={styles.searchWrap}>
-          <Ionicons name="search" size={18} color="rgba(0,0,0,0.4)" style={styles.searchIcon} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search shops or products..."
-            placeholderTextColor="rgba(0,0,0,0.35)"
-            value={search}
-            onChangeText={setSearch}
-          />
-        </View>
+        {/* Search bar */}
+        <TouchableOpacity style={s.searchBar} activeOpacity={0.85}>
+          <Ionicons name="search-outline" size={18} color="#999" />
+          <Text style={s.searchPlaceholder}>Search shops, products, brands…</Text>
+          <View style={s.searchFilter}>
+            <Ionicons name="options-outline" size={16} color="#FF8A00" />
+          </View>
+        </TouchableOpacity>
       </LinearGradient>
 
-      <ScrollView
-        style={styles.body}
-        showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FF8A00" />}
-      >
-        {/* Categories */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.catScroll}
-          contentContainerStyle={styles.catContent}>
-          {CATEGORIES.map(cat => (
-            <TouchableOpacity
-              key={cat.id}
-              style={[styles.catChip, category === cat.id && styles.catChipActive]}
-              onPress={() => setCategory(cat.id)}
-            >
-              <Text style={styles.catEmoji}>{cat.emoji}</Text>
-              <Text style={[styles.catLabel, category === cat.id && styles.catLabelActive]}>
-                {cat.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-
-        {/* Promo banner */}
-        <LinearGradient
-          colors={['#0B1A2B', '#0F2236']}
-          style={styles.promoBanner}
-          start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+      {loading ? (
+        <View style={s.center}>
+          <ActivityIndicator size="large" color="#FF8A00" />
+          <Text style={s.loadTxt}>Finding shops near you…</Text>
+        </View>
+      ) : (
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => fetchShops(true)} tintColor="#FF8A00" />}
         >
-          <View>
-            <Text style={styles.promoTitle}>⚡ QuickPass</Text>
-            <Text style={styles.promoSub}>Free delivery on all orders</Text>
-            <TouchableOpacity style={styles.promoBtn}>
-              <Text style={styles.promoBtnText}>Try ₹99/month</Text>
+          {/* ── CATEGORY TABS ── */}
+          <View style={s.catWrap}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.catContent}>
+              {CATEGORIES.map(c => (
+                <TouchableOpacity key={c.id}
+                  style={[s.catChip, category === c.id && s.catChipOn]}
+                  onPress={() => { setCategory(c.id); setProducts(c.id === 'all' ? [] : MOCK_PRODUCTS[c.id] || []); }}>
+                  <Text style={s.catEmoji}>{c.emoji}</Text>
+                  <Text style={[s.catTxt, category === c.id && s.catTxtOn]}>{c.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+
+          {/* ── SHOW FULL HOME LAYOUT ONLY WHEN NO FILTER ── */}
+          {category === 'all' && (<>
+          {/* ── HERO BANNER SLIDER ── */}
+          <View style={s.bannerSection}>
+            <FlatList
+              ref={bannerRef}
+              data={BANNERS}
+              keyExtractor={b => String(b.id)}
+              horizontal
+              pagingEnabled
+              snapToInterval={W - 32}
+              snapToAlignment="start"
+              decelerationRate="fast"
+              showsHorizontalScrollIndicator={false}
+              onViewableItemsChanged={({ viewableItems }: { viewableItems: ViewToken[] }) => {
+                if (viewableItems[0]) setBannerIdx(viewableItems[0].index ?? 0);
+              }}
+              viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
+              getItemLayout={(_: any, index: number) => ({
+                length: W - 32, offset: (W - 32) * index, index,
+              })}
+              renderItem={({ item: b }: { item: typeof BANNERS[0] }) => (
+                <LinearGradient colors={[b.color1, b.color2]}
+                  style={s.bannerCard} start={{ x:0,y:0 }} end={{ x:1,y:1 }}>
+                  <View style={s.bannerBadge}>
+                    <Text style={s.bannerBadgeTxt}>{b.badge}</Text>
+                  </View>
+                  <View style={{ flex:1 }}>
+                    <Text style={s.bannerTitle}>{b.title}</Text>
+                    <Text style={s.bannerSub}>{b.sub}</Text>
+                  </View>
+                  <Text style={s.bannerEmoji}>{b.emoji}</Text>
+                </LinearGradient>
+              )}
+            />
+            {/* Dot indicators */}
+            <View style={s.dots}>
+              {BANNERS.map((_, i) => (
+                <View key={i} style={[s.dot, i === bannerIdx && s.dotOn]} />
+              ))}
+            </View>
+          </View>
+
+          {/* ── OFFER STRIPS ── */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}
+            contentContainerStyle={s.offerContent} style={s.offerScroll}>
+            {OFFERS.map(o => (
+              <View key={o.id} style={[s.offerChip, { borderColor: o.color + '40', backgroundColor: o.color + '0D' }]}>
+                <Text style={[s.offerAmt, { color: o.color }]}>{o.title}</Text>
+                <Text style={s.offerSub}>{o.sub}</Text>
+                {o.code !== 'AUTO' && (
+                  <View style={[s.codeBox, { borderColor: o.color + '50' }]}>
+                    <Text style={[s.codeTxt, { color: o.color }]}>{o.code}</Text>
+                  </View>
+                )}
+              </View>
+            ))}
+          </ScrollView>
+
+          {/* ── COLLECTIONS GRID ── */}
+          <View style={s.section}>
+            <View style={s.secRow}>
+              <Text style={s.secTitle}>Shop by Category</Text>
+              <TouchableOpacity><Text style={s.secLink}>See all</Text></TouchableOpacity>
+            </View>
+            <View style={s.collectGrid}>
+              {COLLECTIONS.map(c => (
+                <TouchableOpacity key={c.id} style={[s.collectCard, { backgroundColor: c.color }]}
+                  activeOpacity={0.8}>
+                  <Text style={s.collectEmoji}>{c.emoji}</Text>
+                  <Text style={s.collectLabel}>{c.label}</Text>
+                  <Text style={s.collectCount}>{c.count} items</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
+          {/* ── FEATURED SHOPS HORIZONTAL SCROLL ── */}
+          <View style={s.section}>
+            <View style={s.secRow}>
+              <Text style={s.secTitle}>⭐ Top Rated Nearby</Text>
+              <TouchableOpacity><Text style={s.secLink}>See all</Text></TouchableOpacity>
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}
+              contentContainerStyle={s.featuredContent}>
+              {shops.filter(s => s.is_open).slice(0,4).map(shop => (
+                <TouchableOpacity key={shop.id} style={s.featuredCard}
+                  onPress={() => navigation.navigate('Shop', { shop })} activeOpacity={0.88}>
+                  <LinearGradient colors={['#FFF4E6','#FFE8CC']} style={s.featuredImg}>
+                    <Text style={{ fontSize:32 }}>🏪</Text>
+                  </LinearGradient>
+                  <View style={s.featuredInfo}>
+                    <Text style={s.featuredName} numberOfLines={1}>{shop.name}</Text>
+                    <View style={s.featuredMeta}>
+                      <Ionicons name="star" size={11} color="#F59E0B" />
+                      <Text style={s.featuredMetaTxt}>{shop.rating}</Text>
+                      <Text style={s.featuredDot}>·</Text>
+                      <Text style={s.featuredMetaTxt}>{shop.eta}</Text>
+                    </View>
+                    <Text style={s.featuredDist}>{shop.distance}</Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+
+          {/* ── PROMO BANNER ── */}
+          <View style={s.promoBannerWrap}>
+            <LinearGradient colors={['#0B1A2B','#1C3A5E']} style={s.promoBanner}
+              start={{ x:0,y:0 }} end={{ x:1,y:0 }}>
+              <View>
+                <Text style={s.promoTitle}>🛵 Ride with Zuqu</Text>
+                <Text style={s.promoSub}>Become a delivery partner & earn ₹800/day</Text>
+                <TouchableOpacity style={s.promoBtn}>
+                  <Text style={s.promoBtnTxt}>Join Now →</Text>
+                </TouchableOpacity>
+              </View>
+              <Text style={{ fontSize:52 }}>💰</Text>
+            </LinearGradient>
+          </View>
+
+          </> )}
+
+          {/* ── ALL SHOPS LIST ── */}
+          {/* ── PRODUCT GRID when category selected ── */}
+          {category !== 'all' && products.length > 0 && (
+            <View style={s.section}>
+              <View style={s.secRow}>
+                <Text style={s.secTitle}>{CATEGORIES.find(c => c.id === category)?.emoji} {CATEGORIES.find(c => c.id === category)?.label}</Text>
+                <Text style={s.secLink}>{products.length} items</Text>
+              </View>
+              <View style={s.productGrid}>
+                {products.map(p => (
+                  <TouchableOpacity key={p.id} style={s.productCard} activeOpacity={0.85}>
+                    <View style={s.productImgWrap}>
+                      <Text style={s.productEmoji}>{p.emoji}</Text>
+                      {p.badge ? (
+                        <View style={s.productBadge}>
+                          <Text style={s.productBadgeTxt}>{p.badge}</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    <Text style={s.productName} numberOfLines={2}>{p.name}</Text>
+                    <Text style={s.productShop} numberOfLines={1}>📍 {p.shop}</Text>
+                    <View style={s.productBottom}>
+                      <Text style={s.productPrice}>₹{p.price}</Text>
+                      <TouchableOpacity style={s.productAddBtn}>
+                        <Ionicons name="add" size={16} color="#FF8A00" />
+                      </TouchableOpacity>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          )}
+
+          {/* ── SHOPS LIST ── */}
+          <View style={s.section}>
+            <View style={s.secRow}>
+              <Text style={s.secTitle}>
+                {category === 'all' ? `${filtered.length} Shops Nearby` : 'Shops with this category'}
+              </Text>
+              <TouchableOpacity style={s.sortBtn}>
+                <Ionicons name="funnel-outline" size={14} color="#FF8A00" />
+                <Text style={s.sortTxt}>Filter</Text>
+              </TouchableOpacity>
+            </View>
+
+            {filtered.length === 0 ? (
+              <View style={s.empty}>
+                <Text style={{ fontSize:44 }}>🔍</Text>
+                <Text style={s.emptyT}>No shops found</Text>
+                <Text style={s.emptySub}>Try a different filter</Text>
+              </View>
+            ) : (
+              filtered.map(shop => (
+                <TouchableOpacity key={shop.id}
+                  style={[s.shopCard, !shop.is_open && s.shopCardFaded]}
+                  onPress={() => navigation.navigate('Shop', { shop })} activeOpacity={0.88}>
+
+                  {/* Shop image / icon */}
+                  <LinearGradient colors={['#FFF4E6','#FFE8CC']} style={s.shopImg}>
+                    <Text style={{ fontSize:30 }}>🏪</Text>
+                    {!shop.is_open && (
+                      <View style={s.closedOverlay}>
+                        <Text style={s.closedTxt}>CLOSED</Text>
+                      </View>
+                    )}
+                  </LinearGradient>
+
+                  {/* Info */}
+                  <View style={{ flex:1 }}>
+                    <View style={s.shopTopRow}>
+                      <Text style={s.shopName} numberOfLines={1}>{shop.name}</Text>
+                      {shop.is_open
+                        ? <View style={s.openPill}><View style={s.greenDot} /><Text style={s.openTxt}>Open</Text></View>
+                        : <View style={s.closedPill}><Text style={s.closedPillTxt}>Closed</Text></View>
+                      }
+                    </View>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false}
+                      style={{ marginBottom:8 }} contentContainerStyle={{ gap:5 }}>
+                      {(shop.tags||[]).slice(0,4).map((t: string) => (
+                        <View key={t} style={s.tag}><Text style={s.tagTxt}>{t}</Text></View>
+                      ))}
+                    </ScrollView>
+                    <View style={s.shopMetaRow}>
+                      <Ionicons name="star" size={12} color="#F59E0B" />
+                      <Text style={s.shopMetaTxt}>{shop.rating}</Text>
+                      <Text style={s.shopMetaSep}>·</Text>
+                      <Ionicons name="time-outline" size={12} color="#AAA" />
+                      <Text style={s.shopMetaTxt}>{shop.eta}</Text>
+                      <Text style={s.shopMetaSep}>·</Text>
+                      <Ionicons name="location-outline" size={12} color="#AAA" />
+                      <Text style={s.shopMetaTxt}>{shop.distance}</Text>
+                    </View>
+                    {shop.is_open && (
+                      <View style={s.freeDelivery}>
+                        <Ionicons name="bicycle-outline" size={11} color="#16A34A" />
+                        <Text style={s.freeDeliveryTxt}>Free delivery above ₹199</Text>
+                      </View>
+                    )}
+                  </View>
+
+                  <Ionicons name="chevron-forward" size={16} color="#DDD" />
+                </TouchableOpacity>
+              ))
+            )}
+          </View>
+
+          {/* ── BOTTOM CTA ── */}
+          <View style={s.bottomCta}>
+            <Text style={s.bottomCtaTitle}>Can't find your shop? 🏪</Text>
+            <Text style={s.bottomCtaSub}>Suggest a local shop to add on Zuqu</Text>
+            <TouchableOpacity style={s.suggestBtn}>
+              <LinearGradient colors={['#FF8A00','#FF5C00']} style={s.suggestGrad}
+                start={{ x:0,y:0 }} end={{ x:1,y:0 }}>
+                <Text style={s.suggestTxt}>Suggest a Shop</Text>
+              </LinearGradient>
             </TouchableOpacity>
           </View>
-          <Text style={styles.promoEmoji}>🛵</Text>
-        </LinearGradient>
 
-        {/* Shops section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>
-            {filtered.length} Shops Nearby
-          </Text>
-
-          {filtered.map(shop => (
-            <TouchableOpacity
-              key={shop.id}
-              style={styles.shopCard}
-              onPress={() => navigation.navigate('Shop', { shop })}
-              activeOpacity={0.85}
-            >
-              <View style={styles.shopImgPlaceholder}>
-                <Text style={styles.shopEmoji}>🏪</Text>
-              </View>
-              <View style={styles.shopInfo}>
-                <View style={styles.shopRow}>
-                  <Text style={styles.shopName}>{shop.name}</Text>
-                  {!shop.is_open && (
-                    <View style={styles.closedBadge}>
-                      <Text style={styles.closedText}>Closed</Text>
-                    </View>
-                  )}
-                </View>
-                <View style={styles.shopTags}>
-                  {shop.tags.map(t => (
-                    <View key={t} style={styles.tag}>
-                      <Text style={styles.tagText}>{t}</Text>
-                    </View>
-                  ))}
-                </View>
-                <View style={styles.shopMeta}>
-                  <View style={styles.metaItem}>
-                    <Ionicons name="star" size={13} color="#FACC15" />
-                    <Text style={styles.metaText}>{shop.rating} ({shop.reviews})</Text>
-                  </View>
-                  <View style={styles.metaDot} />
-                  <View style={styles.metaItem}>
-                    <Ionicons name="time-outline" size={13} color={colors.muted} />
-                    <Text style={styles.metaText}>{shop.eta}</Text>
-                  </View>
-                  <View style={styles.metaDot} />
-                  <View style={styles.metaItem}>
-                    <Ionicons name="location-outline" size={13} color={colors.muted} />
-                    <Text style={styles.metaText}>{shop.distance}</Text>
-                  </View>
-                </View>
-              </View>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <View style={{ height: 100 }} />
-      </ScrollView>
+          <View style={{ height:110 }} />
+        </ScrollView>
+      )}
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container:    { flex: 1, backgroundColor: '#F5F5F5' },
+// ─── STYLES ──────────────────────────────────────────────────────
+const s = StyleSheet.create({
+  root:           { flex:1, backgroundColor:'#F7F8FA' },
+  center:         { flex:1, alignItems:'center', justifyContent:'center', gap:10 },
+  loadTxt:        { fontSize:14, color:'#888' },
 
   // Header
-  header:       { paddingTop: 52, paddingBottom: 16, paddingHorizontal: 20 },
-  headerTop:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 },
-  locationRow:  { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 },
-  locationLabel:{ color: 'rgba(255,255,255,0.8)', fontSize: 12, fontWeight: '500' },
-  locationBtn:  { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  locationText: { color: '#fff', fontSize: 17, fontWeight: '800' },
-  profileBtn:   { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.2)',
-                   alignItems: 'center', justifyContent: 'center' },
-  profileEmoji: { fontSize: 20 },
-  searchWrap:   { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff',
-                   borderRadius: 14, paddingHorizontal: 14, height: 46 },
-  searchIcon:   { marginRight: 8 },
-  searchInput:  { flex: 1, fontSize: 15, color: '#111', fontWeight: '500' },
+  header:         { paddingTop:56, paddingBottom:14, paddingHorizontal:16 },
+  hTop:           { flexDirection:'row', alignItems:'flex-start', justifyContent:'space-between', marginBottom:12 },
+  locationWrap:   { flex:1 },
+  locationRow:    { flexDirection:'row', alignItems:'center', gap:4, marginBottom:3 },
+  locationLbl:    { color:'rgba(255,255,255,0.8)', fontSize:12 },
+  locationTxt:    { color:'#fff', fontSize:18, fontWeight:'800', maxWidth:220 },
+  hActions:       { flexDirection:'row', gap:8, alignItems:'center' },
+  hBtn:           { width:38, height:38, borderRadius:19, backgroundColor:'rgba(255,255,255,0.2)',
+                     alignItems:'center', justifyContent:'center' },
+  notifDot:       { position:'absolute', top:6, right:6, width:8, height:8, borderRadius:4,
+                     backgroundColor:'#22C55E', borderWidth:1.5, borderColor:'#FF8A00' },
+  avatarSmall:    { width:32, height:32, borderRadius:16, backgroundColor:'#fff',
+                     alignItems:'center', justifyContent:'center' },
+  searchBar:      { flexDirection:'row', alignItems:'center', backgroundColor:'#fff',
+                     borderRadius:14, paddingHorizontal:14, height:46, gap:10,
+                     shadowColor:'#000', shadowOpacity:0.1, shadowRadius:8, shadowOffset:{width:0,height:2} },
+  searchPlaceholder:{ flex:1, fontSize:14, color:'#BBB' },
+  searchFilter:   { width:28, height:28, borderRadius:8, backgroundColor:'#FFF4E6',
+                     alignItems:'center', justifyContent:'center' },
 
-  // Body
-  body:         { flex: 1 },
-  catScroll:    { backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
-  catContent:   { paddingHorizontal: 16, paddingVertical: 12, gap: 8 },
-  catChip:      { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14,
-                   paddingVertical: 8, borderRadius: 99, backgroundColor: '#F5F5F5', borderWidth: 1.5,
-                   borderColor: 'transparent' },
-  catChipActive:{ backgroundColor: 'rgba(255,138,0,0.1)', borderColor: '#FF8A00' },
-  catEmoji:     { fontSize: 16 },
-  catLabel:     { fontSize: 13, fontWeight: '600', color: '#666' },
-  catLabelActive:{ color: '#FF8A00' },
+  // Categories
+  catWrap:        { backgroundColor:'#fff', borderBottomWidth:0.5, borderBottomColor:'#F0F0F0' },
+  catContent:     { paddingHorizontal:16, paddingVertical:10, gap:8 },
+  catChip:        { flexDirection:'row', alignItems:'center', gap:5, paddingHorizontal:14,
+                     paddingVertical:8, borderRadius:99, backgroundColor:'#F2F3F5',
+                     borderWidth:1.5, borderColor:'transparent' },
+  catChipOn:      { backgroundColor:'rgba(255,138,0,0.1)', borderColor:'#FF8A00' },
+  catEmoji:       { fontSize:15 },
+  catTxt:         { fontSize:13, fontWeight:'600', color:'#666' },
+  catTxtOn:       { color:'#FF8A00' },
 
-  // Promo
-  promoBanner:  { margin: 16, borderRadius: 18, padding: 20,
-                   flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  promoTitle:   { fontSize: 18, fontWeight: '800', color: '#FF8A00', marginBottom: 4 },
-  promoSub:     { fontSize: 13, color: 'rgba(255,255,255,0.6)', marginBottom: 12 },
-  promoBtn:     { backgroundColor: '#FF8A00', borderRadius: 10, paddingHorizontal: 16, paddingVertical: 8, alignSelf: 'flex-start' },
-  promoBtnText: { color: '#fff', fontSize: 13, fontWeight: '700' },
-  promoEmoji:   { fontSize: 52 },
+  // Banner slider
+  bannerSection:  { paddingHorizontal:16, paddingTop:16, paddingBottom:4 },
 
-  // Section
-  section:      { paddingHorizontal: 16 },
-  sectionTitle: { fontSize: 18, fontWeight: '800', color: '#111', marginBottom: 14 },
+  bannerCard:     { width:W-32, borderRadius:20, padding:20, flexDirection:'row',
+                     alignItems:'center', justifyContent:'space-between', height:110 },
+  bannerBadge:    { position:'absolute', top:12, right:12, backgroundColor:'rgba(255,255,255,0.25)',
+                     borderRadius:99, paddingHorizontal:8, paddingVertical:3 },
+  bannerBadgeTxt: { fontSize:10, fontWeight:'800', color:'#fff', letterSpacing:1 },
+  bannerTitle:    { fontSize:18, fontWeight:'800', color:'#fff', marginBottom:5 },
+  bannerSub:      { fontSize:12, color:'rgba(255,255,255,0.75)', lineHeight:17, maxWidth:180 },
+  bannerEmoji:    { fontSize:44 },
+  dots:           { flexDirection:'row', justifyContent:'center', gap:5, marginTop:10 },
+  dot:            { width:5, height:5, borderRadius:2.5, backgroundColor:'#DDD' },
+  dotOn:          { backgroundColor:'#FF8A00', width:16 },
 
-  // Shop card
-  shopCard:     { backgroundColor: '#fff', borderRadius: 18, marginBottom: 14, padding: 14,
-                   flexDirection: 'row', gap: 14,
-                   shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 12, shadowOffset: { width: 0, height: 3 } },
-  shopImgPlaceholder: { width: 72, height: 72, borderRadius: 14, backgroundColor: '#FFF4E6',
-                         alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  shopEmoji:    { fontSize: 32 },
-  shopInfo:     { flex: 1 },
-  shopRow:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
-  shopName:     { fontSize: 16, fontWeight: '700', color: '#111', flex: 1 },
-  closedBadge:  { backgroundColor: '#FEE2E2', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
-  closedText:   { fontSize: 11, fontWeight: '700', color: '#EF4444' },
-  shopTags:     { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginBottom: 8 },
-  tag:          { backgroundColor: '#F5F5F5', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
-  tagText:      { fontSize: 11, color: '#666', fontWeight: '500' },
-  shopMeta:     { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  metaItem:     { flexDirection: 'row', alignItems: 'center', gap: 3 },
-  metaText:     { fontSize: 12, color: '#888', fontWeight: '500' },
-  metaDot:      { width: 3, height: 3, borderRadius: 1.5, backgroundColor: '#CCC' },
+  // Offers
+  offerScroll:    { marginTop:14 },
+  offerContent:   { paddingHorizontal:16, gap:10 },
+  offerChip:      { borderRadius:14, padding:12, borderWidth:1, minWidth:140 },
+  offerAmt:       { fontSize:20, fontWeight:'900', marginBottom:2 },
+  offerSub:       { fontSize:11, color:'#666', marginBottom:8 },
+  codeBox:        { borderWidth:1, borderStyle:'dashed', borderRadius:6,
+                     paddingHorizontal:8, paddingVertical:3, alignSelf:'flex-start' },
+  codeTxt:        { fontSize:11, fontWeight:'800', letterSpacing:1 },
+
+  // Sections
+  section:        { paddingHorizontal:16, marginTop:20 },
+  secRow:         { flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:12 },
+  secTitle:       { fontSize:18, fontWeight:'800', color:'#111' },
+  secLink:        { fontSize:13, fontWeight:'700', color:'#FF8A00' },
+
+  // Collections grid
+  collectGrid:    { flexDirection:'row', flexWrap:'wrap', gap:10 },
+  collectCard:    { width:(W-42)/2, borderRadius:16, padding:14, minHeight:90 },
+  collectEmoji:   { fontSize:28, marginBottom:6 },
+  collectLabel:   { fontSize:14, fontWeight:'700', color:'#333', marginBottom:3 },
+  collectCount:   { fontSize:11, color:'#888' },
+
+  // Featured horizontal
+  featuredContent:{ gap:12, paddingRight:4 },
+  featuredCard:   { width:130, backgroundColor:'#fff', borderRadius:16, overflow:'hidden',
+                     shadowColor:'#000', shadowOpacity:0.05, shadowRadius:8, shadowOffset:{width:0,height:2} },
+  featuredImg:    { height:80, alignItems:'center', justifyContent:'center' },
+  featuredInfo:   { padding:10 },
+  featuredName:   { fontSize:13, fontWeight:'700', color:'#111', marginBottom:4 },
+  featuredMeta:   { flexDirection:'row', alignItems:'center', gap:3, marginBottom:3 },
+  featuredMetaTxt:{ fontSize:11, color:'#888' },
+  featuredDot:    { color:'#CCC', fontSize:11 },
+  featuredDist:   { fontSize:11, color:'#FF8A00', fontWeight:'600' },
+
+  // Promo banner
+  promoBannerWrap:{ paddingHorizontal:16, marginTop:20 },
+  promoBanner:    { borderRadius:20, padding:20, flexDirection:'row',
+                     justifyContent:'space-between', alignItems:'center' },
+  promoTitle:     { fontSize:16, fontWeight:'800', color:'#FF8A00', marginBottom:4 },
+  promoSub:       { fontSize:12, color:'rgba(255,255,255,0.55)', marginBottom:12, lineHeight:17 },
+  promoBtn:       { backgroundColor:'#FF8A00', borderRadius:10, paddingHorizontal:14, paddingVertical:8, alignSelf:'flex-start' },
+  promoBtnTxt:    { color:'#fff', fontSize:13, fontWeight:'700' },
+
+  // Sort btn
+  sortBtn:        { flexDirection:'row', alignItems:'center', gap:4, backgroundColor:'#FFF4E6',
+                     borderRadius:99, paddingHorizontal:12, paddingVertical:6 },
+  sortTxt:        { fontSize:12, color:'#FF8A00', fontWeight:'700' },
+
+  // Shop cards
+  shopCard:       { backgroundColor:'#fff', borderRadius:18, marginBottom:12, padding:14,
+                     flexDirection:'row', alignItems:'center', gap:12,
+                     shadowColor:'#000', shadowOpacity:0.05, shadowRadius:10, shadowOffset:{width:0,height:3} },
+  shopCardFaded:  { opacity:0.6 },
+  shopImg:        { width:76, height:76, borderRadius:16, alignItems:'center', justifyContent:'center',
+                     flexShrink:0, overflow:'hidden' },
+  closedOverlay:  { position:'absolute', inset:0, backgroundColor:'rgba(0,0,0,0.4)',
+                     alignItems:'center', justifyContent:'center', borderRadius:16 },
+  closedTxt:      { fontSize:9, fontWeight:'900', color:'#fff', letterSpacing:1 },
+  shopTopRow:     { flexDirection:'row', alignItems:'center', justifyContent:'space-between', marginBottom:6 },
+  shopName:       { fontSize:15, fontWeight:'700', color:'#111', flex:1 },
+  openPill:       { flexDirection:'row', alignItems:'center', gap:4, backgroundColor:'#DCFCE7',
+                     borderRadius:99, paddingHorizontal:8, paddingVertical:3 },
+  greenDot:       { width:6, height:6, borderRadius:3, backgroundColor:'#22C55E' },
+  openTxt:        { fontSize:11, fontWeight:'700', color:'#16A34A' },
+  closedPill:     { backgroundColor:'#FEE2E2', borderRadius:99, paddingHorizontal:8, paddingVertical:3 },
+  closedPillTxt:  { fontSize:11, fontWeight:'700', color:'#DC2626' },
+  tag:            { backgroundColor:'#F2F3F5', borderRadius:99, paddingHorizontal:9, paddingVertical:3 },
+  tagTxt:         { fontSize:11, color:'#666', fontWeight:'500' },
+  shopMetaRow:    { flexDirection:'row', alignItems:'center', gap:4 },
+  shopMetaTxt:    { fontSize:11, color:'#888', fontWeight:'500' },
+  shopMetaSep:    { color:'#DDD', fontSize:11 },
+  freeDelivery:   { flexDirection:'row', alignItems:'center', gap:3, backgroundColor:'#DCFCE7',
+                     borderRadius:99, paddingHorizontal:8, paddingVertical:3, marginTop:6, alignSelf:'flex-start' },
+  freeDeliveryTxt:{ fontSize:11, color:'#16A34A', fontWeight:'600' },
+
+  // Empty
+  empty:          { alignItems:'center', paddingVertical:40, gap:8 },
+  emptyT:         { fontSize:17, fontWeight:'700', color:'#333' },
+  emptySub:       { fontSize:13, color:'#999' },
+
+  // Bottom CTA
+  productGrid:    { flexDirection:'row', flexWrap:'wrap', gap:10, marginBottom:8 },
+  productCard:    { width:(W-42)/2, backgroundColor:'#fff', borderRadius:16, padding:12,
+                     shadowColor:'#000', shadowOpacity:0.05, shadowRadius:8, shadowOffset:{width:0,height:2} },
+  productImgWrap: { width:'100%', height:90, backgroundColor:'#FFF4E6', borderRadius:12,
+                     alignItems:'center', justifyContent:'center', marginBottom:8, overflow:'hidden' },
+  productEmoji:   { fontSize:40 },
+  productBadge:   { position:'absolute', top:6, left:6, backgroundColor:'#FF8A00',
+                     borderRadius:6, paddingHorizontal:6, paddingVertical:2 },
+  productBadgeTxt:{ fontSize:9, fontWeight:'800', color:'#fff', letterSpacing:0.5 },
+  productName:    { fontSize:13, fontWeight:'700', color:'#111', marginBottom:4, lineHeight:18 },
+  productShop:    { fontSize:11, color:'#999', marginBottom:8 },
+  productBottom:  { flexDirection:'row', alignItems:'center', justifyContent:'space-between' },
+  productPrice:   { fontSize:15, fontWeight:'800', color:'#FF8A00' },
+  productAddBtn:  { width:28, height:28, borderRadius:8, borderWidth:1.5, borderColor:'#FF8A00',
+                     alignItems:'center', justifyContent:'center' },
+  bottomCta:      { margin:16, backgroundColor:'#fff', borderRadius:20, padding:20, alignItems:'center', gap:6,
+                     shadowColor:'#000', shadowOpacity:0.05, shadowRadius:10, shadowOffset:{width:0,height:3} },
+  bottomCtaTitle: { fontSize:16, fontWeight:'800', color:'#111' },
+  bottomCtaSub:   { fontSize:13, color:'#888', marginBottom:6 },
+  suggestBtn:     { borderRadius:12, overflow:'hidden', alignSelf:'stretch' },
+  suggestGrad:    { paddingVertical:13, alignItems:'center' },
+  suggestTxt:     { color:'#fff', fontSize:14, fontWeight:'700' },
 });

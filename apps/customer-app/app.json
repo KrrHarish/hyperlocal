@@ -13,14 +13,23 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.zuqu.app"
+      "bundleIdentifier": "com.zuqu.app",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Zuqu needs your location to find shops near you and deliver to your address.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Zuqu needs your location to find shops near you and deliver to your address.",
+        "NSLocationAlwaysUsageDescription": "Zuqu needs your location to find shops near you and deliver to your address."
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#020A14"
       },
-      "package": "com.zuqu.app"
+      "package": "com.zuqu.app",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -31,7 +40,14 @@
     "plugins": [
       "expo-secure-store",
       "expo-asset",
-      "expo-font"
+      "expo-font",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Zuqu needs your location to find shops near you.",
+          "locationAlwaysAndWhenInUsePermission": "Zuqu needs your location to find shops near you."
+        }
+      ]
     ]
   }
 }
