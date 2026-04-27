@@ -1,0 +1,37 @@
+{
+  "expo": {
+    "name": "Zuqu",
+    "slug": "zuqu",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#020A14"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.zuqu.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#020A14"
+      },
+      "package": "com.zuqu.app"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "plugins": [
+      "expo-secure-store",
+      "expo-asset",
+      "expo-font"
+    ]
+  }
+}

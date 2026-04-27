@@ -1,0 +1,82 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Dark navy gradient background -->
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0B1A2B"/>
+      <stop offset="100%" stop-color="#020A14"/>
+    </linearGradient>
+
+    <!-- Orange gradient for Z -->
+    <linearGradient id="zGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FF8A00"/>
+      <stop offset="100%" stop-color="#FF5C00"/>
+    </linearGradient>
+
+    <!-- Glow filter for Z -->
+    <filter id="glowZ" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="18" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+
+    <!-- Glow filter for u -->
+    <filter id="glowU" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="14" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+
+    <!-- Speed line glow -->
+    <filter id="glowLine" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- Background squircle -->
+  <rect width="1024" height="1024" rx="220" fill="url(#bgGrad)"/>
+
+  <!-- 
+    Layout: centred, tight spacing
+    Speed lines: x=120-220
+    Z: x=248-520, y=280-720  (tall caps, thick rounded)
+    u: x=548-760, y=400-680  (lowercase, rounded)
+    All centred around y=512
+  -->
+
+  <!-- Speed lines — orange glow, 3 lines -->
+  <!-- Line 1 — longest, brightest -->
+  <line x1="120" y1="436" x2="224" y2="436" stroke="url(#zGrad)" stroke-width="20" stroke-linecap="round" filter="url(#glowLine)"/>
+  <line x1="120" y1="436" x2="224" y2="436" stroke="#FF8A00" stroke-width="20" stroke-linecap="round"/>
+
+  <!-- Line 2 -->
+  <line x1="100" y1="494" x2="224" y2="494" stroke="url(#zGrad)" stroke-width="15" stroke-linecap="round" filter="url(#glowLine)" opacity="0.8"/>
+  <line x1="100" y1="494" x2="224" y2="494" stroke="#FF7200" stroke-width="15" stroke-linecap="round" opacity="0.8"/>
+
+  <!-- Line 3 — shortest, faintest -->
+  <line x1="120" y1="546" x2="224" y2="546" stroke="url(#zGrad)" stroke-width="11" stroke-linecap="round" filter="url(#glowLine)" opacity="0.5"/>
+  <line x1="120" y1="546" x2="224" y2="546" stroke="#FF6000" stroke-width="11" stroke-linecap="round" opacity="0.5"/>
+
+  <!-- Z — orange gradient, rounded thick strokes, glow -->
+  <!-- Glow layer (blurred, behind) -->
+  <g filter="url(#glowZ)" opacity="0.6">
+    <line x1="260" y1="298" x2="506" y2="298" stroke="#FF8A00" stroke-width="72" stroke-linecap="round"/>
+    <line x1="492" y1="316" x2="274" y2="700" stroke="#FF6500" stroke-width="72" stroke-linecap="round"/>
+    <line x1="260" y1="718" x2="506" y2="718" stroke="#FF5C00" stroke-width="72" stroke-linecap="round"/>
+  </g>
+  <!-- Solid Z on top -->
+  <line x1="260" y1="298" x2="506" y2="298" stroke="url(#zGrad)" stroke-width="72" stroke-linecap="round"/>
+  <line x1="492" y1="316" x2="274" y2="700" stroke="url(#zGrad)" stroke-width="72" stroke-linecap="round"/>
+  <line x1="260" y1="718" x2="506" y2="718" stroke="url(#zGrad)" stroke-width="72" stroke-linecap="round"/>
+
+  <!-- u — white, rounded, glow -->
+  <!-- Glow layer -->
+  <g filter="url(#glowU)" opacity="0.5">
+    <line x1="558" y1="412" x2="558" y2="634" stroke="white" stroke-width="68" stroke-linecap="round"/>
+    <path d="M558 634 Q558 730 660 730 Q762 730 762 634" fill="none" stroke="white" stroke-width="68" stroke-linecap="round"/>
+    <line x1="762" y1="634" x2="762" y2="412" stroke="white" stroke-width="68" stroke-linecap="round"/>
+  </g>
+  <!-- Solid u on top -->
+  <line x1="558" y1="412" x2="558" y2="634" stroke="white" stroke-width="68" stroke-linecap="round"/>
+  <path d="M558 634 Q558 730 660 730 Q762 730 762 634" fill="none" stroke="white" stroke-width="68" stroke-linecap="round"/>
+  <line x1="762" y1="634" x2="762" y2="412" stroke="white" stroke-width="68" stroke-linecap="round"/>
+
+</svg>
