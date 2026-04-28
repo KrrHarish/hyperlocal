@@ -73,8 +73,13 @@ export async function orderRoutes(server: FastifyInstance) {
     }
 
     const user = request.user as { id: string }
-    const orders = await getCustomerOrders(user.id)
-    return reply.send({ orders })
+    try {
+      const orders = await getCustomerOrders(user.id)
+      return reply.send({ orders })
+    } catch (err: any) {
+      server.log.error({ err }, 'getCustomerOrders failed')
+      return reply.status(500).send({ error: err.message || 'Failed to fetch orders' })
+    }
   })
 
   // GET /shops/:shopId/orders — shop sees incoming orders

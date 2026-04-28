@@ -18,6 +18,19 @@ const STEPS = [
 const STEP_INDEX: any = { placed:0, confirmed:1, picked_up:2, delivered:3 };
 
 const PAST_STATUSES   = ['delivered', 'cancelled', 'rejected', 'failed'];
+
+// #ORD-0003 when order_number exists, else last 6 hex chars of UUID
+const fmtId = (orderId: any, orderNumber?: number): string => {
+  if (orderNumber) return `ORD-${String(orderNumber).padStart(4, '0')}`;
+  if (!orderId) return '——';
+  return orderId.toString().replace(/-/g, '').slice(-6).toUpperCase();
+};
+
+const fmtAddr = (addr: any): string => {
+  if (!addr) return 'HSR Layout, Bengaluru';
+  if (typeof addr === 'string') return addr;
+  return [addr.line1, addr.city, addr.pincode].filter(Boolean).join(', ');
+};
 const ACTIVE_STATUSES = ['pending', 'placed', 'confirmed', 'assigned', 'picked_up', 'out_for_delivery', 'processing'];
 
 export default function OrderTrackingScreen({ route, navigation }: any) {
@@ -106,7 +119,7 @@ export default function OrderTrackingScreen({ route, navigation }: any) {
           </TouchableOpacity>
           <View style={{ flex:1 }}>
             <Text style={s.headerTitle}>{isCancelled ? 'Order Cancelled' : 'Order Delivered'}</Text>
-            <Text style={s.headerSub}>#{orderId?.toString().slice(-8).toUpperCase()}</Text>
+            <Text style={s.headerSub}>#{fmtId(orderId, order?.order_number)}</Text>
           </View>
           <View style={{ width:36 }} />
         </LinearGradient>
@@ -132,7 +145,7 @@ export default function OrderTrackingScreen({ route, navigation }: any) {
 
             <View style={s.detailRow}>
               <Text style={s.detailLbl}>Order ID</Text>
-              <Text style={s.detailVal}>#{orderId?.toString().slice(-8).toUpperCase()}</Text>
+              <Text style={s.detailVal}>#{fmtId(orderId, order?.order_number)}</Text>
             </View>
             <View style={s.detailDivider} />
 
@@ -161,7 +174,7 @@ export default function OrderTrackingScreen({ route, navigation }: any) {
             <View style={s.detailRow}>
               <Text style={s.detailLbl}>Delivery Address</Text>
               <Text style={[s.detailVal, { maxWidth:180, textAlign:'right' }]}>
-                {order?.delivery_address || 'HSR Layout, Bengaluru'}
+                {fmtAddr(order?.delivery_address)}
               </Text>
             </View>
           </View>
@@ -211,7 +224,7 @@ export default function OrderTrackingScreen({ route, navigation }: any) {
         </TouchableOpacity>
         <View style={{ flex:1 }}>
           <Text style={s.headerTitle}>Live Tracking</Text>
-          <Text style={s.headerSub}>#{orderId?.toString().slice(-8).toUpperCase()}</Text>
+          <Text style={s.headerSub}>#{fmtId(orderId, order?.order_number)}</Text>
         </View>
         <TouchableOpacity style={s.iconBtn} onPress={() => setShowCancel(true)}>
           <Ionicons name="close-circle-outline" size={22} color="#fff" />

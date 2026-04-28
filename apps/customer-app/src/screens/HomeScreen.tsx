@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  View, Text, TextInput, ScrollView, TouchableOpacity,
+  View, Text, ScrollView, TouchableOpacity,
   StyleSheet, RefreshControl, ActivityIndicator,
-  Dimensions, FlatList, Animated, Easing, ViewToken,
+  Dimensions, FlatList, ViewToken,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import { getNearbyShops } from '../services/api';
+import { getNearbyShops, getProductsByCategory } from '../services/api';
 import { useCart } from '../store/CartContext';
 
 const { width: W } = Dimensions.get('window');
@@ -46,79 +46,58 @@ const OFFERS = [
   { id:3, title:'₹50 OFF',  sub:'On orders above ₹299',   code:'SAVE50',  color:'#8B5CF6' },
 ];
 
-const MOCK_SHOPS = [
-  { id:'341e69d3', name:'Raju General Store',   category:'grocery',   distance:'0.3 km', eta:'8 min',  rating:4.8, reviews:124, is_open:true,  tags:['Grocery','Snacks','Dairy'] },
-  { id:'shop-002', name:'Krishna Medicals',      category:'pharmacy',  distance:'0.5 km', eta:'10 min', rating:4.6, reviews:89,  is_open:true,  tags:['Medicine','Personal Care'] },
-  { id:'shop-003', name:'Lakshmi Provisions',    category:'grocery',   distance:'0.8 km', eta:'15 min', rating:4.7, reviews:210, is_open:false, tags:['Grocery','Pulses','Spices'] },
-  { id:'shop-004', name:'Cool Drinks Corner',    category:'beverages', distance:'0.4 km', eta:'9 min',  rating:4.5, reviews:67,  is_open:true,  tags:['Beverages','Ice Cream'] },
-  { id:'shop-005', name:'Anand Bakery',          category:'bakery',    distance:'0.6 km', eta:'11 min', rating:4.9, reviews:302, is_open:true,  tags:['Bakery','Cakes','Bread'] },
-];
+// No mock shops or products — all data comes from the real API
 
-const MOCK_PRODUCTS: Record<string, any[]> = {
-  grocery: [
-    { id:'g1', name:'Tata Salt 1kg',          price:22,  shop:'Raju General Store', eta:'8 min',  emoji:'🧂', badge:'' },
-    { id:'g2', name:'Fortune Sunflower Oil 1L',price:145, shop:'Raju General Store', eta:'8 min',  emoji:'🫒', badge:'BESTSELLER' },
-    { id:'g3', name:'Aashirvaad Atta 5kg',     price:280, shop:'Lakshmi Provisions', eta:'15 min', emoji:'🌾', badge:'' },
-    { id:'g4', name:'Toor Dal 1kg',            price:140, shop:'Lakshmi Provisions', eta:'15 min', emoji:'🫘', badge:'20% OFF' },
-    { id:'g5', name:'Basmati Rice 5kg',        price:350, shop:'Raju General Store', eta:'8 min',  emoji:'🍚', badge:'' },
-    { id:'g6', name:'Sugar 1kg',               price:45,  shop:'Raju General Store', eta:'8 min',  emoji:'🍬', badge:'' },
-  ],
-  dairy: [
-    { id:'d1', name:'Amul Milk 500ml',         price:28,  shop:'Raju General Store', eta:'8 min',  emoji:'🥛', badge:'FRESH' },
-    { id:'d2', name:'Amul Butter 100g',        price:56,  shop:'Raju General Store', eta:'8 min',  emoji:'🧈', badge:'' },
-    { id:'d3', name:'Mother Dairy Curd 400g',  price:38,  shop:'Raju General Store', eta:'8 min',  emoji:'🥣', badge:'' },
-    { id:'d4', name:'Amul Cheese Slices',      price:125, shop:'Raju General Store', eta:'8 min',  emoji:'🧀', badge:'' },
-  ],
-  snacks: [
-    { id:'s1', name:'Lays Classic 90g',        price:20,  shop:'Raju General Store', eta:'8 min',  emoji:'🍿', badge:'' },
-    { id:'s2', name:'Maggi Noodles 4pk',       price:60,  shop:'Raju General Store', eta:'8 min',  emoji:'🍜', badge:'POPULAR' },
-    { id:'s3', name:'Parle-G 500g',            price:35,  shop:'Raju General Store', eta:'8 min',  emoji:'🍪', badge:'' },
-    { id:'s4', name:'Kurkure Masala 90g',      price:20,  shop:'Cool Drinks Corner', eta:'9 min',  emoji:'🌽', badge:'' },
-  ],
-  beverages: [
-    { id:'b1', name:'Tropicana Orange 1L',     price:85,  shop:'Cool Drinks Corner', eta:'9 min',  emoji:'🧃', badge:'' },
-    { id:'b2', name:'Coca Cola 750ml',         price:42,  shop:'Cool Drinks Corner', eta:'9 min',  emoji:'🥤', badge:'' },
-    { id:'b3', name:'Red Bull 250ml',          price:125, shop:'Cool Drinks Corner', eta:'9 min',  emoji:'⚡', badge:'ENERGY' },
-    { id:'b4', name:'Minute Maid Pulpy',       price:30,  shop:'Cool Drinks Corner', eta:'9 min',  emoji:'🍊', badge:'' },
-  ],
-  personal_care: [
-    { id:'p1', name:'Colgate MaxFresh 150g',   price:65,  shop:'Krishna Medicals',   eta:'10 min', emoji:'🪥', badge:'' },
-    { id:'p2', name:'Dove Shampoo 180ml',      price:175, shop:'Krishna Medicals',   eta:'10 min', emoji:'🧴', badge:'' },
-    { id:'p3', name:'Dettol Soap 75g',         price:35,  shop:'Krishna Medicals',   eta:'10 min', emoji:'🧼', badge:'' },
-    { id:'p4', name:'Parachute Coconut Oil',   price:95,  shop:'Krishna Medicals',   eta:'10 min', emoji:'💆', badge:'POPULAR' },
-  ],
-  pharmacy: [
-    { id:'m1', name:'Dolo 650 Strip',          price:30,  shop:'Krishna Medicals',   eta:'10 min', emoji:'💊', badge:'' },
-    { id:'m2', name:'Betadine 30ml',           price:65,  shop:'Krishna Medicals',   eta:'10 min', emoji:'🩹', badge:'' },
-    { id:'m3', name:'Vicks VapoRub 50g',       price:90,  shop:'Krishna Medicals',   eta:'10 min', emoji:'🫁', badge:'' },
-  ],
-  bakery: [
-    { id:'bk1', name:'Britannia Bread 400g',   price:42,  shop:'Anand Bakery',       eta:'11 min', emoji:'🍞', badge:'FRESH' },
-    { id:'bk2', name:'Chocolate Cake Slice',   price:65,  shop:'Anand Bakery',       eta:'11 min', emoji:'🍰', badge:'' },
-    { id:'bk3', name:'Croissant',              price:35,  shop:'Anand Bakery',       eta:'11 min', emoji:'🥐', badge:'FRESH' },
-    { id:'bk4', name:'Pav (6 pcs)',            price:25,  shop:'Anand Bakery',       eta:'11 min', emoji:'🥖', badge:'' },
-  ],
-  household: [
-    { id:'h1', name:'Surf Excel 500g',         price:78,  shop:'Raju General Store', eta:'8 min',  emoji:'🧺', badge:'' },
-    { id:'h2', name:'Harpic Toilet Cleaner',   price:95,  shop:'Raju General Store', eta:'8 min',  emoji:'🚽', badge:'' },
-    { id:'h3', name:'Colin Glass Cleaner',     price:85,  shop:'Raju General Store', eta:'8 min',  emoji:'🪟', badge:'' },
-  ],
+function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2 +
+            Math.cos(lat1 * Math.PI/180) * Math.cos(lat2 * Math.PI/180) * Math.sin(dLng/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+const CATEGORY_EMOJI: Record<string, string> = {
+  grocery: '🛒', dairy: '🥛', snacks: '🍿', beverages: '🧃',
+  personal_care: '🧴', household: '🧹', bakery: '🍞', pharmacy: '💊', all: '🏪',
 };
+
+function productEmoji(name: string, category: string): string {
+  const n = name.toLowerCase();
+  if (n.includes('milk'))    return '🥛'; if (n.includes('butter'))  return '🧈';
+  if (n.includes('curd'))    return '🥣'; if (n.includes('cheese'))  return '🧀';
+  if (n.includes('bread'))   return '🍞'; if (n.includes('rice'))    return '🍚';
+  if (n.includes('atta'))    return '🌾'; if (n.includes('dal'))     return '🫘';
+  if (n.includes('oil'))     return '🫒'; if (n.includes('salt'))    return '🧂';
+  if (n.includes('sugar'))   return '🍬'; if (n.includes('maggi'))   return '🍜';
+  if (n.includes('biscuit') || n.includes('parle')) return '🍪';
+  if (n.includes('chips') || n.includes('lays'))    return '🍿';
+  if (n.includes('juice') || n.includes('tropicana')) return '🧃';
+  if (n.includes('cola') || n.includes('pepsi'))    return '🥤';
+  if (n.includes('red bull')) return '⚡';
+  if (n.includes('soap') || n.includes('dettol'))  return '🧼';
+  if (n.includes('shampoo')) return '🧴'; if (n.includes('toothpaste')) return '🪥';
+  if (n.includes('detergent') || n.includes('surf')) return '🧺';
+  if (n.includes('tablet') || n.includes('dolo'))  return '💊';
+  return CATEGORY_EMOJI[category?.toLowerCase()] || '📦';
+}
 
 // ─── COMPONENT ──────────────────────────────────────────────────
 export default function HomeScreen({ navigation }: any) {
-  const [search, setSearch]           = useState('');
-  const [category, setCategory]       = useState('all');
-  const [shops, setShops]             = useState<any[]>([]);
-  const [loading, setLoading]         = useState(true);
-  const [refreshing, setRefreshing]   = useState(false);
-  const [products, setProducts]         = useState<any[]>([]);
+  const [search]                        = useState('');
+  const [category, setCategory]        = useState('all');
+  const [shops, setShops]              = useState<any[]>([]);
+  const [loading, setLoading]          = useState(true);
+  const [refreshing, setRefreshing]    = useState(false);
   const [locationName, setLocationName] = useState('Detecting...');
+  const [userLat, setUserLat]          = useState(12.9116);
+  const [userLng, setUserLng]          = useState(77.6389);
+  const [catProducts, setCatProducts]  = useState<any[]>([]);
+  const [catLoading, setCatLoading]    = useState(false);
   const [bannerIdx, setBannerIdx]     = useState(0);
   const bannerRef = useRef<FlatList<typeof BANNERS[0]>>(null);
-  const { addItem, updateQty, items } = useCart();
-  const getQty = (pid: string) => items.find(i => i.product_id === pid)?.quantity || 0;
   const bannerTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const { addItem, items, updateQty, removeItem } = useCart();
 
   // ── Auto-scroll banners
   useEffect(() => {
@@ -136,7 +115,9 @@ export default function HomeScreen({ navigation }: any) {
   const fetchShops = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true); else setLoading(true);
     try {
-      let lat = 12.9116, lng = 77.6389;
+      // Default: HSR Layout, Bengaluru
+      const DEFAULT_LAT = 12.9116, DEFAULT_LNG = 77.6389;
+      let lat = DEFAULT_LAT, lng = DEFAULT_LNG;
       setLocationName('HSR Layout, Bengaluru');
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
@@ -145,34 +126,82 @@ export default function HomeScreen({ navigation }: any) {
             accuracy: Location.Accuracy.Balanced,
             timeInterval: 5000,
           });
-          lat = loc.coords.latitude;
-          lng = loc.coords.longitude;
-          const geo = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
-          if (geo[0]) {
-            setLocationName(`${geo[0].district || geo[0].subregion || 'Your area'}, ${geo[0].city || ''}`);
+          const detectedLat = loc.coords.latitude;
+          const detectedLng = loc.coords.longitude;
+
+          // Sanity check: if detected location is outside India's rough bounding box
+          // (e.g. iOS Simulator defaulting to San Francisco), fall back to Bengaluru.
+          const inIndia = detectedLat >= 6 && detectedLat <= 37
+                       && detectedLng >= 68 && detectedLng <= 98;
+          if (inIndia) {
+            lat = detectedLat;
+            lng = detectedLng;
+            setUserLat(lat); setUserLng(lng);
+            const geo = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
+            if (geo[0]) {
+              setLocationName(`${geo[0].district || geo[0].subregion || 'Your area'}, ${geo[0].city || ''}`);
+            }
           }
+          // else: keep default Bengaluru coords + label (simulator is lying)
         }
       } catch (locErr) {
-        // Location failed — use default Bengaluru coords
         console.log('Location error, using default:', locErr);
       }
       const res = await getNearbyShops(lat, lng, 5000);
       const list = res.data?.shops || res.data || [];
-      setShops(Array.isArray(list) && list.length > 0
-        ? list.map((s: any) => ({
-            id: s.id, name: s.name, category: s.category || 'grocery',
-            distance: s.distance_km ? `${parseFloat(s.distance_km).toFixed(1)} km` : '—',
-            eta: s.distance_km ? `${Math.ceil(parseFloat(s.distance_km) * 4 + 5)} min` : '—',
-            rating: s.rating || 4.5, reviews: s.total_reviews || 0,
-            is_open: s.is_open, tags: s.tags || [s.category || 'General'],
-          }))
-        : MOCK_SHOPS
+      setShops(Array.isArray(list)
+        ? list.map((s: any) => {
+            const distKm = (s.lat && s.lng)
+              ? haversineKm(lat, lng, parseFloat(s.lat), parseFloat(s.lng))
+              : null;
+            return {
+              id: s.id, name: s.name, category: s.category || 'grocery',
+              address: s.address || '',
+              lat: s.lat, lng: s.lng,
+              distance: distKm != null
+                ? distKm < 1 ? `${Math.round(distKm * 1000)} m` : `${distKm.toFixed(1)} km`
+                : 'Nearby',
+              eta: distKm != null
+                ? `${Math.ceil(distKm * 4 + 5)} min`
+                : '10–15 min',
+              rating: parseFloat(s.rating) || 4.5,
+              reviews: s.total_reviews || 0,
+              is_open: s.is_open ?? true,
+              tags: s.tags || [s.category || 'General'],
+            };
+          })
+        : []
       );
-    } catch { setShops(MOCK_SHOPS); setLocationName('HSR Layout, Bengaluru'); }
+    } catch { setShops([]); setLocationName('HSR Layout, Bengaluru'); }
     finally { setLoading(false); setRefreshing(false); }
   }, []);
 
   useEffect(() => { fetchShops(); }, [fetchShops]);
+
+  // ── Fetch products when a category is selected
+  useEffect(() => {
+    if (category === 'all') { setCatProducts([]); return; }
+    setCatLoading(true);
+    getProductsByCategory(category)
+      .then(res => setCatProducts(res.data?.products || []))
+      .catch(() => setCatProducts([]))
+      .finally(() => setCatLoading(false));
+  }, [category]);
+
+  const getCartQty = (productId: string) =>
+    items.find(i => i.product_id === productId)?.quantity || 0;
+
+  const handleAddToCart = (p: any) => {
+    const currentQty = getCartQty(p.id);
+    if (currentQty === 0) {
+      addItem(
+        { product_id: p.id, name: p.name, price: p.price, quantity: 1 },
+        p.shop_id, p.shop_name
+      );
+    } else {
+      updateQty(p.id, currentQty + 1);
+    }
+  };
 
   const filtered = shops.filter(s => {
     const matchSearch = !search || s.name.toLowerCase().includes(search.toLowerCase());
@@ -242,7 +271,7 @@ export default function HomeScreen({ navigation }: any) {
               {CATEGORIES.map(c => (
                 <TouchableOpacity key={c.id}
                   style={[s.catChip, category === c.id && s.catChipOn]}
-                  onPress={() => { setCategory(c.id); setProducts(c.id === 'all' ? [] : MOCK_PRODUCTS[c.id] || []); }}>
+                  onPress={() => setCategory(c.id)}>
                   <Text style={s.catEmoji}>{c.emoji}</Text>
                   <Text style={[s.catTxt, category === c.id && s.catTxtOn]}>{c.label}</Text>
                 </TouchableOpacity>
@@ -373,71 +402,90 @@ export default function HomeScreen({ navigation }: any) {
 
           </> )}
 
-          {/* ── ALL SHOPS LIST ── */}
-          {/* ── PRODUCT GRID when category selected ── */}
-          {category !== 'all' && products.length > 0 && (
+          {/* ── CATEGORY PRODUCT GRID (shown when a category is selected) ── */}
+          {category !== 'all' && (
             <View style={s.section}>
               <View style={s.secRow}>
-                <Text style={s.secTitle}>{CATEGORIES.find(c => c.id === category)?.emoji} {CATEGORIES.find(c => c.id === category)?.label}</Text>
-                <Text style={s.secLink}>{products.length} items</Text>
+                <Text style={s.secTitle}>
+                  {CATEGORIES.find(c => c.id === category)?.emoji}{' '}
+                  {CATEGORIES.find(c => c.id === category)?.label}
+                </Text>
+                <Text style={s.secLink}>{catProducts.length} items</Text>
               </View>
-              <View style={s.productGrid}>
-                {products.map(p => {
-                  const qty = getQty(p.id);
-                  const shopForProduct = shops.find(s => s.name === p.shop) || shops[0] || { id:'341e69d3', name: p.shop };
-                  return (
-                    <TouchableOpacity key={p.id} style={s.productCard} activeOpacity={0.88}
-                      onPress={() => navigation.navigate('ProductDetail', { product: p, shop: shopForProduct })}>
-                      <View style={s.productImgWrap}>
-                        <Text style={s.productEmoji}>{p.emoji}</Text>
-                        {p.badge ? (
-                          <View style={s.productBadge}>
-                            <Text style={s.productBadgeTxt}>{p.badge}</Text>
-                          </View>
-                        ) : null}
-                      </View>
-                      <Text style={s.productName} numberOfLines={2}>{p.name}</Text>
-                      <Text style={s.productShop} numberOfLines={1}>📍 {p.shop}</Text>
-                      <View style={s.productBottom}>
-                        <Text style={s.productPrice}>₹{p.price}</Text>
-                        {qty === 0 ? (
-                          <TouchableOpacity style={s.productAddBtn}
-                            onPress={(e) => {
-                              e.stopPropagation();
-                              addItem({ product_id: p.id, name: p.name, price: p.price, quantity: 1 }, shopForProduct.id, shopForProduct.name);
-                            }}>
-                            <Ionicons name="add" size={16} color="#FF8A00" />
-                          </TouchableOpacity>
-                        ) : (
-                          <View style={s.miniCounter}>
-                            <TouchableOpacity style={s.miniBtn}
-                              onPress={(e) => { e.stopPropagation(); updateQty(p.id, qty - 1); }}>
-                              <Ionicons name="remove" size={12} color="#fff" />
-                            </TouchableOpacity>
-                            <Text style={s.miniNum}>{qty}</Text>
-                            <TouchableOpacity style={s.miniBtn}
-                              onPress={(e) => {
-                                e.stopPropagation();
-                                addItem({ product_id: p.id, name: p.name, price: p.price, quantity: 1 }, shopForProduct.id, shopForProduct.name);
-                              }}>
-                              <Ionicons name="add" size={12} color="#fff" />
-                            </TouchableOpacity>
-                          </View>
-                        )}
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
+
+              {catLoading ? (
+                <View style={s.center}>
+                  <ActivityIndicator size="large" color="#FF8A00" />
+                </View>
+              ) : catProducts.length === 0 ? (
+                <View style={s.empty}>
+                  <Text style={{ fontSize:44 }}>🛒</Text>
+                  <Text style={s.emptyT}>No products yet</Text>
+                  <Text style={s.emptySub}>Check back soon!</Text>
+                </View>
+              ) : (
+                <View style={s.productGrid}>
+                  {catProducts.map((p: any) => {
+                    const emoji = productEmoji(p.name, p.category);
+                    const qty = getCartQty(p.id);
+                    const isOos = p.stock_status === 'out_of_stock';
+                    return (
+                      <TouchableOpacity
+                        key={p.id}
+                        style={[s.productCard, isOos && { opacity: 0.55 }]}
+                        activeOpacity={0.85}
+                        onPress={() => navigation.navigate('Shop', {
+                          shop: { id: p.shop_id, name: p.shop_name, address: p.shop_address,
+                                  rating: p.shop_rating, is_open: p.shop_is_open,
+                                  eta: '10–15 min', distance: 'Nearby', category: p.category }
+                        })}
+                      >
+                        <View style={s.productImgWrap}>
+                          <Text style={s.productEmoji}>{emoji}</Text>
+                          {isOos && (
+                            <View style={[s.productBadge, { backgroundColor:'#EF4444' }]}>
+                              <Text style={s.productBadgeTxt}>OUT OF STOCK</Text>
+                            </View>
+                          )}
+                        </View>
+                        <Text style={s.productName} numberOfLines={2}>{p.name}</Text>
+                        <Text style={s.productShop} numberOfLines={1}>📍 {p.shop_name}</Text>
+                        <View style={s.productBottom}>
+                          <Text style={s.productPrice}>₹{p.price}</Text>
+                          {!isOos && (
+                            qty > 0 ? (
+                              <View style={s.miniCounter}>
+                                <TouchableOpacity style={s.miniBtn}
+                                  onPress={() => qty === 1 ? removeItem(p.id) : updateQty(p.id, qty - 1)}>
+                                  <Text style={{ color:'#fff', fontSize:16, fontWeight:'800', lineHeight:20 }}>−</Text>
+                                </TouchableOpacity>
+                                <Text style={s.miniNum}>{qty}</Text>
+                                <TouchableOpacity style={s.miniBtn}
+                                  onPress={() => handleAddToCart(p)}>
+                                  <Text style={{ color:'#fff', fontSize:16, fontWeight:'800', lineHeight:20 }}>+</Text>
+                                </TouchableOpacity>
+                              </View>
+                            ) : (
+                              <TouchableOpacity style={s.productAddBtn}
+                                onPress={() => handleAddToCart(p)}>
+                                <Ionicons name="add" size={18} color="#FF8A00" />
+                              </TouchableOpacity>
+                            )
+                          )}
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
             </View>
           )}
 
-          {/* ── SHOPS LIST ── */}
+          {/* ── SHOPS LIST (always shown on 'all', hidden when category selected) ── */}
+          {category === 'all' && (
           <View style={s.section}>
             <View style={s.secRow}>
-              <Text style={s.secTitle}>
-                {category === 'all' ? `${filtered.length} Shops Nearby` : 'Shops with this category'}
-              </Text>
+              <Text style={s.secTitle}>{filtered.length} Shops Nearby</Text>
               <TouchableOpacity style={s.sortBtn}>
                 <Ionicons name="funnel-outline" size={14} color="#FF8A00" />
                 <Text style={s.sortTxt}>Filter</Text>
@@ -504,6 +552,7 @@ export default function HomeScreen({ navigation }: any) {
               ))
             )}
           </View>
+          )}
 
           {/* ── BOTTOM CTA ── */}
           <View style={s.bottomCta}>

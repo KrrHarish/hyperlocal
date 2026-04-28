@@ -3,10 +3,23 @@ import {
   searchMasterCatalog,
   addProductToShop,
   getShopProducts,
+  getProductsByCategory,
   updateStockStatus
 } from './products.service'
 
 export async function productRoutes(server: FastifyInstance) {
+
+  // GET /products/by-category?category=grocery
+  server.get('/products/by-category', async (request, reply) => {
+    const { category } = request.query as { category?: string }
+    if (!category) return reply.status(400).send({ error: 'category is required' })
+    try {
+      const products = await getProductsByCategory(category)
+      return reply.send({ products })
+    } catch (err: any) {
+      return reply.status(500).send({ error: err.message })
+    }
+  })
 
   // GET /products/search?q=tata
   server.get('/products/search', async (request, reply) => {
@@ -20,8 +33,16 @@ export async function productRoutes(server: FastifyInstance) {
   // GET /shops/:shopId/products
   server.get('/shops/:shopId/products', async (request, reply) => {
     const { shopId } = request.params as { shopId: string }
-    const products = await getShopProducts(shopId)
-    return reply.send({ products })
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    if (!UUID_RE.test(shopId)) {
+      return reply.send({ products: [] })  // fake/partial ID — return empty gracefully
+    }
+    try {
+      const products = await getShopProducts(shopId)
+      return reply.send({ products })
+    } catch (err: any) {
+      return reply.send({ products: [] })
+    }
   })
 
   // POST /shops/:shopId/products

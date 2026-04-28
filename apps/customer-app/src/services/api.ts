@@ -52,23 +52,30 @@ export const getShopProducts = (shopId: string) =>
 export const searchProducts = (query: string) =>
   api.get('/products/search', { params: { q: query } });
 
+export const getProductsByCategory = (category: string) =>
+  api.get('/products/by-category', { params: { category } });
+
 // ── ORDERS ────────────────────────────────────────────
 export const placeOrder = (payload: {
   shop_id: string;
-  items: { product_id: string; quantity: number }[];
-  delivery_address: string;
-  delivery_lat: number;
-  delivery_lng: number;
+  items: { shop_product_id: string; quantity: number }[];
+  delivery_address: {
+    line1: string;
+    city: string;
+    pincode: string;
+    lat: number;
+    lng: number;
+  };
 }) => api.post('/orders', payload);
 
 export const getMyOrders = () =>
-  api.get('/orders/my');
+  api.get('/orders');
 
 export const getOrderById = (orderId: string) =>
   api.get(`/orders/${orderId}`);
 
 export const confirmDeliveryOTP = (orderId: string, otp: string) =>
-  api.post(`/orders/${orderId}/confirm-delivery`, { otp });
+  api.post(`/orders/${orderId}/deliver`, { otp });
 
 export const cancelOrder = (orderId: string, reason?: string) =>
   api.post(`/orders/${orderId}/cancel`, { reason });

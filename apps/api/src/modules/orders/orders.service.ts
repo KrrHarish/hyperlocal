@@ -89,17 +89,41 @@ export async function placeOrder(customerId: string, data: {
 }
 
 export async function getOrder(orderId: string) {
-  const order = await db('orders').where({ id: orderId }).first()
+  const order = await db('orders as o')
+    .join('shops as s', 's.id', 'o.shop_id')
+    .where({ 'o.id': orderId })
+    .select('o.*', 's.name as shop_name', db.raw('o.total_amount as total'))
+    .first()
   if (!order) throw new Error('Order not found')
 
   const items = await db('order_items').where({ order_id: orderId })
-  return { ...order, items }
+  const items_count = items.length
+  const preview = items.slice(0, 3).map((i: any) => i.product_name).join(', ')
+    + (items.length > 3 ? '…' : '')
+  return { ...order, items, items_count, preview }
 }
 
 export async function getCustomerOrders(customerId: string) {
-  return db('orders')
-    .where({ customer_id: customerId })
-    .orderBy('created_at', 'desc')
+  const orders = await db('orders as o')
+    .leftJoin('shops as s', 's.id', 'o.shop_id')
+    .where({ 'o.customer_id': customerId })
+    .orderBy('o.updated_at', 'desc')
+    .select('o.*', 's.name as shop_name', db.raw('o.total_amount as total'))
+
+  const enriched = await Promise.all(
+    orders.map(async (order: any) => {
+      try {
+        const items = await db('order_items').where({ order_id: order.id })
+        const items_count = items.length
+        const preview = items.slice(0, 3).map((i: any) => i.product_name).join(', ')
+          + (items.length > 3 ? '…' : '')
+        return { ...order, items_count, preview }
+      } catch {
+        return { ...order, items_count: 0, preview: '' }
+      }
+    })
+  )
+  return enriched
 }
 
 export async function getShopOrders(shopId: string, status?: string) {

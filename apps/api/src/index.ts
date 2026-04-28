@@ -6,6 +6,7 @@ import { shopRoutes } from './modules/shops/shops.routes'
 import { productRoutes } from './modules/products/products.routes'
 import { orderRoutes } from './modules/orders/orders.routes'
 import { riderRoutes } from './modules/riders/riders.routes'
+import { cancelOrder } from './cancel'
 
 dotenv.config()
 
@@ -17,12 +18,13 @@ const server = Fastify({ logger: true })
 server.register(cors, { origin: '*' })
 server.register(jwt, { secret: process.env.JWT_SECRET || 'secret' })
 
-// Routes
-server.register(authRoutes)
-server.register(shopRoutes)
-server.register(productRoutes)
-server.register(orderRoutes)
-server.register(riderRoutes)
+// Routes — all mounted under /api to match the mobile client base URL
+server.register(authRoutes,    { prefix: '/api' })
+server.register(shopRoutes,    { prefix: '/api' })
+server.register(productRoutes, { prefix: '/api' })
+server.register(orderRoutes,   { prefix: '/api' })
+server.register(riderRoutes,   { prefix: '/api' })
+server.register(cancelOrder,   { prefix: '/api' })
 
 // Health check
 server.get('/health', async () => {

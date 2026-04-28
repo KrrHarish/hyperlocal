@@ -8,7 +8,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { useCart } from '../store/CartContext';
 import { placeOrder } from '../services/api';
 
-const DELIVERY_ADDRESS = '123, 5th Cross, HSR Layout, Bengaluru - 560102';
+const DELIVERY_ADDRESS = {
+  line1:   '123, 5th Cross',
+  city:    'Bengaluru',
+  pincode: '560102',
+  lat:     12.9116,
+  lng:     77.6389,
+};
 
 export default function CartScreen({ navigation }: any) {
   const { items, shopId, shopName, updateQty, removeItem, clearCart, total, itemCount } = useCart();
@@ -18,23 +24,39 @@ export default function CartScreen({ navigation }: any) {
   const deliveryFee = total >= 500 ? 0 : total >= 200 ? 25 : 40;
   const grandTotal  = total + deliveryFee + tip;
 
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
   const handlePlaceOrder = async () => {
     if (!shopId) return;
+
+    // Guard: make sure all product IDs are real UUIDs (not leftover mock IDs like "g1", "g2")
+    const badItems = items.filter(i => !UUID_RE.test(i.product_id));
+    if (badItems.length > 0) {
+      Alert.alert(
+        'Stale Cart Items',
+        `Some items (${badItems.map(i => i.name).join(', ')}) are from old demo data and can't be ordered. Please clear your cart and add fresh items from the shop.`,
+        [
+          { text: 'Clear Cart', style: 'destructive', onPress: clearCart },
+          { text: 'Cancel', style: 'cancel' },
+        ]
+      );
+      return;
+    }
+
     setLoading(true);
     try {
       const res = await placeOrder({
         shop_id: shopId,
-        items: items.map(i => ({ product_id: i.product_id, quantity: i.quantity })),
+        items: items.map(i => ({ shop_product_id: i.product_id, quantity: i.quantity })),
         delivery_address: DELIVERY_ADDRESS,
-        delivery_lat: 12.9116,
-        delivery_lng: 77.6389,
       });
-      const orderId = res.data?.order_id || res.data?.id || 'mock-order-001';
+      const orderId = res.data?.order?.id || res.data?.order_id || res.data?.id;
+      if (!orderId) throw new Error('No order ID returned from server');
       clearCart();
-      navigation.replace('OrderTracking', { orderId });
-    } catch {
-      clearCart();
-      navigation.replace('OrderTracking', { orderId: 'mock-order-001' });
+      navigation.replace('OrderTracking', { orderId, status: 'pending' });
+    } catch (err: any) {
+      const msg = err?.response?.data?.error || err?.message || 'Could not place order. Please try again.';
+      Alert.alert('Order Failed', msg);
     } finally {
       setLoading(false);
     }
@@ -142,7 +164,7 @@ export default function CartScreen({ navigation }: any) {
           </View>
           <View style={{ flex: 1 }}>
             <Text style={s.addressLabel}>Delivering to</Text>
-            <Text style={s.addressText}>{DELIVERY_ADDRESS}</Text>
+            <Text style={s.addressText}>{DELIVERY_ADDRESS.line1}, {DELIVERY_ADDRESS.city} - {DELIVERY_ADDRESS.pincode}</Text>
           </View>
           <TouchableOpacity style={s.changeBtn}>
             <Text style={s.changeTxt}>Change</Text>

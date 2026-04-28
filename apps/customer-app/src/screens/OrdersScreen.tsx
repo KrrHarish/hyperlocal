@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import { getMyOrders } from '../services/api';
 
 const ACTIVE_STATUSES = ['pending','confirmed','assigned','picked_up','out_for_delivery','processing'];
@@ -22,14 +23,23 @@ const STATUS_CONFIG: any = {
   rejected:         { bg:'#FEE2E2', txt:'#B91C1C', border:'#FECACA', icon:'close-circle-outline',     label:'Rejected'          },
 };
 
-const MOCK_ORDERS = [
-  { id:'ord-001', shop_name:'Raju General Store', status:'pending',
-    total:156, items_count:4, created_at:'Just now',   preview:'Milk, Bread, Salt, Oil' },
-  { id:'ord-002', shop_name:'Cool Drinks Corner',  status:'delivered',
-    total:85,  items_count:1, created_at:'Yesterday',  preview:'Tropicana Orange 1L' },
-  { id:'ord-003', shop_name:'Lakshmi Provisions',  status:'cancelled',
-    total:240, items_count:5, created_at:'3 days ago', preview:'Rice, Dal, Wheat…' },
-];
+function formatDate(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  try {
+    const d = new Date(iso);
+    const now = new Date();
+    const diffMs = now.getTime() - d.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    if (diffMins < 2)  return 'Just now';
+    if (diffMins < 60) return `${diffMins} min ago`;
+    const diffHrs = Math.floor(diffMins / 60);
+    if (diffHrs < 24)  return `${diffHrs}h ago`;
+    const diffDays = Math.floor(diffHrs / 24);
+    if (diffDays === 1) return 'Yesterday';
+    if (diffDays < 7)  return `${diffDays} days ago`;
+    return d.toLocaleDateString('en-IN', { day:'numeric', month:'short' });
+  } catch { return iso; }
+}
 
 export default function OrdersScreen({ navigation }: any) {
   const [allOrders, setAllOrders]   = useState<any[]>([]);
@@ -43,9 +53,9 @@ export default function OrdersScreen({ navigation }: any) {
     try {
       const res = await getMyOrders();
       const list = res.data?.orders || res.data?.data || res.data || [];
-      setAllOrders(Array.isArray(list) && list.length > 0 ? list : MOCK_ORDERS);
+      setAllOrders(Array.isArray(list) ? list : []);
     } catch {
-      setAllOrders(MOCK_ORDERS);
+      setAllOrders([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -58,13 +68,21 @@ export default function OrdersScreen({ navigation }: any) {
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [fetchOrders]);
 
+  // Refetch immediately whenever the tab comes into focus
+  useFocusEffect(useCallback(() => { fetchOrders(); }, [fetchOrders]));
+
   // Auto switch to active tab if active orders exist
   useEffect(() => {
     if (allOrders.some(o => ACTIVE_STATUSES.includes(o.status))) setTab('active');
   }, [allOrders]);
 
-  const active = allOrders.filter(o => ACTIVE_STATUSES.includes(o.status));
-  const past   = allOrders.filter(o => PAST_STATUSES.includes(o.status));
+  // Sort by last updated (status change), falling back to created_at
+  const byNewest = (a: any, b: any) =>
+    new Date(b.updated_at || b.created_at || 0).getTime() -
+    new Date(a.updated_at || a.created_at || 0).getTime();
+
+  const active = allOrders.filter(o => ACTIVE_STATUSES.includes(o.status)).sort(byNewest);
+  const past   = allOrders.filter(o => PAST_STATUSES.includes(o.status)).sort(byNewest);
   const shown  = tab === 'active' ? active : past;
 
   const getStatus = (status: string) =>
@@ -167,7 +185,7 @@ export default function OrdersScreen({ navigation }: any) {
                   </View>
                   <View style={{ flex:1 }}>
                     <Text style={s.shopName}>{order.shop_name}</Text>
-                    <Text style={s.orderDate}>{order.created_at || order.date || '—'}</Text>
+                    <Text style={s.orderDate}>{formatDate(order.created_at || order.date)}</Text>
                   </View>
                   <View style={[s.statusBadge, { backgroundColor:st.bg, borderColor:st.border }]}>
                     <Ionicons name={st.icon as any} size={12} color={st.txt} />
@@ -188,7 +206,7 @@ export default function OrdersScreen({ navigation }: any) {
                     </Text>
                   </View>
                   <View style={s.cardRight}>
-                    <Text style={s.total}>₹{order.total}</Text>
+                    <Text style={s.total}>₹{parseFloat(order.total || order.total_amount || '0').toFixed(0)}</Text>
                     {isActiveOrder ? (
                       <TouchableOpacity
                         style={s.trackBtn}

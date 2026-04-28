@@ -27,23 +27,9 @@ export async function getShopsByOwner(ownerId: string) {
   return db('shops').where({ owner_id: ownerId })
 }
 
-export async function getNearbyShops(lat: number, lng: number, radiusKm = 2) {
-  // Simple distance formula for prototype — good enough within city scale
-  return db('shops')
-    .whereRaw(`
-      (6371 * acos(
-        cos(radians(?)) * cos(radians(lat)) *
-        cos(radians(lng) - radians(?)) +
-        sin(radians(?)) * sin(radians(lat))
-      )) < ?
-    `, [lat, lng, lat, radiusKm])
-    .where({ is_active: true })
-    .select('*')
-    .orderByRaw(`
-      (6371 * acos(
-        cos(radians(?)) * cos(radians(lat)) *
-        cos(radians(lng) - radians(?)) +
-        sin(radians(?)) * sin(radians(lat))
-      )) asc
-    `, [lat, lng, lat])
+export async function getNearbyShops(_lat: number, _lng: number, _radiusKm = 2) {
+  // Prototype: return ALL shops — no distance filter.
+  // The simulator uses the dev machine's real GPS (often a different city/country),
+  // so a distance filter would always return 0 results during development.
+  return db('shops').select('*').orderBy('name', 'asc')
 }

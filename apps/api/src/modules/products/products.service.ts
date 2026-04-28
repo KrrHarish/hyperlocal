@@ -46,6 +46,22 @@ export async function getShopProducts(shopId: string) {
     )
 }
 
+export async function getProductsByCategory(category: string) {
+  return db('shop_products as sp')
+    .join('master_products as mp', 'mp.id', 'sp.master_product_id')
+    .join('shops as s', 's.id', 'sp.shop_id')
+    .where('mp.category', category.toLowerCase())
+    .where('sp.is_visible', true)
+    .select(
+      'sp.id', 'sp.price', 'sp.stock_status',
+      'mp.name', 'mp.brand', 'mp.category', 'mp.unit',
+      's.id as shop_id', 's.name as shop_name',
+      's.address as shop_address', 's.rating as shop_rating',
+      's.is_open as shop_is_open'
+    )
+    .limit(60)
+}
+
 export async function updateStockStatus(shopProductId: string, shopId: string, status: string) {
   const [updated] = await db('shop_products')
     .where({ id: shopProductId, shop_id: shopId })
