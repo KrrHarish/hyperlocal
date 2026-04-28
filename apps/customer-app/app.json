@@ -7,8 +7,6 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
       "backgroundColor": "#020A14"
     },
     "ios": {
@@ -38,6 +36,7 @@
       "**/*"
     ],
     "plugins": [
+      "expo-splash-screen",
       "expo-secure-store",
       "expo-asset",
       "expo-font",

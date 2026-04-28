@@ -70,10 +70,10 @@ export default function OrdersScreen({ navigation }: any) {
   const getStatus = (status: string) =>
     STATUS_CONFIG[status] || { bg:'#F3F4F6', txt:'#374151', border:'#E5E7EB', icon:'ellipse-outline', label:status };
 
-  // Navigate to OrderTracking within OrdersStack
-  const goToTracking = (orderId: string) => {
-    navigation.navigate('OrderTracking', { orderId, status: order.status, orderData: order });
-  };
+  // // Navigate to OrderTracking within OrdersStack
+  // const goToTracking = (orderId: string) => {
+  //   navigation.navigate('OrderTracking', { orderId, status: order.status, orderData: order });
+  // };
 
   return (
     <View style={s.root}>

@@ -2,17 +2,12 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
-// iOS simulator  → localhost
-// Android emulator → 10.0.2.2 (points to host machine)
-// Real device → use your Mac IP e.g. http://192.168.1.5:3000/api
 const getBaseURL = () => {
   if (__DEV__) {
-    if (Platform.OS === 'android') {
-      return 'http://10.0.2.2:3000/api';
-    }
+    if (Platform.OS === 'android') return 'http://10.0.2.2:3000/api';
     return 'http://localhost:3000/api';
   }
-  return 'https://api.zuqu.in/api'; // production
+  return 'https://api.zuqu.in/api';
 };
 
 export const API_BASE = getBaseURL();
@@ -23,14 +18,12 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
-// Attach JWT on every request
 api.interceptors.request.use(async (config) => {
   const token = await AsyncStorage.getItem('zuqu_token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
 
-// Global error handler
 api.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -76,5 +69,8 @@ export const getOrderById = (orderId: string) =>
 
 export const confirmDeliveryOTP = (orderId: string, otp: string) =>
   api.post(`/orders/${orderId}/confirm-delivery`, { otp });
+
+export const cancelOrder = (orderId: string, reason?: string) =>
+  api.post(`/orders/${orderId}/cancel`, { reason });
 
 export default api;

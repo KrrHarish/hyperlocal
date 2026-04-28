@@ -9,6 +9,7 @@ import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { getNearbyShops } from '../services/api';
+import { useCart } from '../store/CartContext';
 
 const { width: W } = Dimensions.get('window');
 
@@ -115,6 +116,8 @@ export default function HomeScreen({ navigation }: any) {
   const [locationName, setLocationName] = useState('Detecting...');
   const [bannerIdx, setBannerIdx]     = useState(0);
   const bannerRef = useRef<FlatList<typeof BANNERS[0]>>(null);
+  const { addItem, updateQty, items } = useCart();
+  const getQty = (pid: string) => items.find(i => i.product_id === pid)?.quantity || 0;
   const bannerTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ── Auto-scroll banners
@@ -133,14 +136,26 @@ export default function HomeScreen({ navigation }: any) {
   const fetchShops = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true); else setLoading(true);
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
       let lat = 12.9116, lng = 77.6389;
-      if (status === 'granted') {
-        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-        lat = loc.coords.latitude; lng = loc.coords.longitude;
-        const geo = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
-        if (geo[0]) setLocationName(`${geo[0].district || geo[0].subregion || 'Your area'}, ${geo[0].city || ''}`);
-      } else { setLocationName('HSR Layout, Bengaluru'); }
+      setLocationName('HSR Layout, Bengaluru');
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status === 'granted') {
+          const loc = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+            timeInterval: 5000,
+          });
+          lat = loc.coords.latitude;
+          lng = loc.coords.longitude;
+          const geo = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
+          if (geo[0]) {
+            setLocationName(`${geo[0].district || geo[0].subregion || 'Your area'}, ${geo[0].city || ''}`);
+          }
+        }
+      } catch (locErr) {
+        // Location failed — use default Bengaluru coords
+        console.log('Location error, using default:', locErr);
+      }
       const res = await getNearbyShops(lat, lng, 5000);
       const list = res.data?.shops || res.data || [];
       setShops(Array.isArray(list) && list.length > 0
@@ -367,26 +382,52 @@ export default function HomeScreen({ navigation }: any) {
                 <Text style={s.secLink}>{products.length} items</Text>
               </View>
               <View style={s.productGrid}>
-                {products.map(p => (
-                  <TouchableOpacity key={p.id} style={s.productCard} activeOpacity={0.85}>
-                    <View style={s.productImgWrap}>
-                      <Text style={s.productEmoji}>{p.emoji}</Text>
-                      {p.badge ? (
-                        <View style={s.productBadge}>
-                          <Text style={s.productBadgeTxt}>{p.badge}</Text>
-                        </View>
-                      ) : null}
-                    </View>
-                    <Text style={s.productName} numberOfLines={2}>{p.name}</Text>
-                    <Text style={s.productShop} numberOfLines={1}>📍 {p.shop}</Text>
-                    <View style={s.productBottom}>
-                      <Text style={s.productPrice}>₹{p.price}</Text>
-                      <TouchableOpacity style={s.productAddBtn}>
-                        <Ionicons name="add" size={16} color="#FF8A00" />
-                      </TouchableOpacity>
-                    </View>
-                  </TouchableOpacity>
-                ))}
+                {products.map(p => {
+                  const qty = getQty(p.id);
+                  const shopForProduct = shops.find(s => s.name === p.shop) || shops[0] || { id:'341e69d3', name: p.shop };
+                  return (
+                    <TouchableOpacity key={p.id} style={s.productCard} activeOpacity={0.88}
+                      onPress={() => navigation.navigate('ProductDetail', { product: p, shop: shopForProduct })}>
+                      <View style={s.productImgWrap}>
+                        <Text style={s.productEmoji}>{p.emoji}</Text>
+                        {p.badge ? (
+                          <View style={s.productBadge}>
+                            <Text style={s.productBadgeTxt}>{p.badge}</Text>
+                          </View>
+                        ) : null}
+                      </View>
+                      <Text style={s.productName} numberOfLines={2}>{p.name}</Text>
+                      <Text style={s.productShop} numberOfLines={1}>📍 {p.shop}</Text>
+                      <View style={s.productBottom}>
+                        <Text style={s.productPrice}>₹{p.price}</Text>
+                        {qty === 0 ? (
+                          <TouchableOpacity style={s.productAddBtn}
+                            onPress={(e) => {
+                              e.stopPropagation();
+                              addItem({ product_id: p.id, name: p.name, price: p.price, quantity: 1 }, shopForProduct.id, shopForProduct.name);
+                            }}>
+                            <Ionicons name="add" size={16} color="#FF8A00" />
+                          </TouchableOpacity>
+                        ) : (
+                          <View style={s.miniCounter}>
+                            <TouchableOpacity style={s.miniBtn}
+                              onPress={(e) => { e.stopPropagation(); updateQty(p.id, qty - 1); }}>
+                              <Ionicons name="remove" size={12} color="#fff" />
+                            </TouchableOpacity>
+                            <Text style={s.miniNum}>{qty}</Text>
+                            <TouchableOpacity style={s.miniBtn}
+                              onPress={(e) => {
+                                e.stopPropagation();
+                                addItem({ product_id: p.id, name: p.name, price: p.price, quantity: 1 }, shopForProduct.id, shopForProduct.name);
+                              }}>
+                              <Ionicons name="add" size={12} color="#fff" />
+                            </TouchableOpacity>
+                          </View>
+                        )}
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
             </View>
           )}
@@ -633,6 +674,9 @@ const s = StyleSheet.create({
   productPrice:   { fontSize:15, fontWeight:'800', color:'#FF8A00' },
   productAddBtn:  { width:28, height:28, borderRadius:8, borderWidth:1.5, borderColor:'#FF8A00',
                      alignItems:'center', justifyContent:'center' },
+  miniCounter:    { flexDirection:'row', alignItems:'center', backgroundColor:'#FF8A00', borderRadius:8, overflow:'hidden' },
+  miniBtn:        { width:24, height:26, alignItems:'center', justifyContent:'center' },
+  miniNum:        { fontSize:12, fontWeight:'800', color:'#fff', minWidth:20, textAlign:'center' },
   bottomCta:      { margin:16, backgroundColor:'#fff', borderRadius:20, padding:20, alignItems:'center', gap:6,
                      shadowColor:'#000', shadowOpacity:0.05, shadowRadius:10, shadowOffset:{width:0,height:3} },
   bottomCtaTitle: { fontSize:16, fontWeight:'800', color:'#111' },

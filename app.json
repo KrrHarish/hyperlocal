@@ -7,8 +7,6 @@
     "icon": "./apps/customer-app/assets/icon.png",
     "userInterfaceStyle": "dark",
     "splash": {
-      "image": "./apps/customer-app/assets/splash-icon.png",
-      "resizeMode": "contain",
       "backgroundColor": "#020A14"
     },
     "ios": {

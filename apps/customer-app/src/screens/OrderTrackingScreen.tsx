@@ -5,7 +5,8 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { getOrderById } from '../services/api';
+import { getOrderById, cancelOrder } from '../services/api';
+import CancelOrderModal from '../components/CancelOrderModal';
 
 const STEPS = [
   { key:'placed',    label:'Order Placed',    sub:'We received your order',       color:'#22C55E', icon:'checkmark-circle-outline' },
@@ -28,6 +29,7 @@ export default function OrderTrackingScreen({ route, navigation }: any) {
   const [step, setStep]       = useState(() => STEP_INDEX[passedStatus] ?? 0);
   const [order, setOrder]     = useState<any>(passedOrderData || null);
   const [loading, setLoading] = useState(!passedOrderData);
+  const [showCancel, setShowCancel] = useState(false);
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const pollRef   = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -211,8 +213,8 @@ export default function OrderTrackingScreen({ route, navigation }: any) {
           <Text style={s.headerTitle}>Live Tracking</Text>
           <Text style={s.headerSub}>#{orderId?.toString().slice(-8).toUpperCase()}</Text>
         </View>
-        <TouchableOpacity style={s.iconBtn}>
-          <Ionicons name="help-circle-outline" size={22} color="#fff" />
+        <TouchableOpacity style={s.iconBtn} onPress={() => setShowCancel(true)}>
+          <Ionicons name="close-circle-outline" size={22} color="#fff" />
         </TouchableOpacity>
       </LinearGradient>
 
@@ -256,6 +258,14 @@ export default function OrderTrackingScreen({ route, navigation }: any) {
               Looking for a nearby rider to pick up your order
             </Text>
           </View>
+        )}
+
+        {/* Cancel button — only for pending/confirmed */}
+        {(step === 0 || step === 1) && (
+          <TouchableOpacity style={s.cancelOrderBtn} onPress={() => setShowCancel(true)}>
+            <Ionicons name="close-circle-outline" size={16} color="#EF4444" />
+            <Text style={s.cancelOrderTxt}>Cancel Order</Text>
+          </TouchableOpacity>
         )}
 
         {/* Steps */}
@@ -362,6 +372,21 @@ export default function OrderTrackingScreen({ route, navigation }: any) {
 
         <View style={{ height:40 }} />
       </ScrollView>
+
+      {/* Cancel Order Modal */}
+      <CancelOrderModal
+        visible={showCancel}
+        orderId={orderId}
+        orderStatus={order?.status || 'pending'}
+        createdAt={order?.created_at || new Date().toISOString()}
+        onClose={() => setShowCancel(false)}
+        onCancelled={() => {
+          setShowCancel(false);
+          setStep(-1); // show cancelled state
+          if (pollRef.current) clearInterval(pollRef.current);
+          navigation.goBack();
+        }}
+      />
     </View>
   );
 }
@@ -447,4 +472,9 @@ const s = StyleSheet.create({
   rateTxt:         { fontSize:14, fontWeight:'700', color:'#FF8A00' },
   reorderBtn:      { height:52, flexDirection:'row', alignItems:'center', justifyContent:'center', gap:8 },
   reorderTxt:      { color:'#fff', fontSize:14, fontWeight:'700' },
+   cancelOrderBtn:  { flexDirection:'row', alignItems:'center', gap:6, alignSelf:'center',
+                      marginTop:8, paddingHorizontal:18, paddingVertical:10,
+                      borderRadius:99, borderWidth:1.5, borderColor:'#EF4444',
+                      backgroundColor:'#FEF2F2' },
+  cancelOrderTxt:  { fontSize:13, fontWeight:'700', color:'#EF4444' },
 });

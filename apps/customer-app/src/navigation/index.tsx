@@ -16,6 +16,7 @@ import CartScreen          from '../screens/CartScreen';
 import OrderTrackingScreen from '../screens/OrderTrackingScreen';
 import OrdersScreen        from '../screens/OrdersScreen';
 import ProfileScreen       from '../screens/ProfileScreen';
+import ProductDetailScreen from '../screens/ProductDetailScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab   = createBottomTabNavigator();
@@ -43,6 +44,7 @@ function HomeStack() {
       <Stack.Screen name="Cart"          component={CartScreen} />
       <Stack.Screen name="OrderTracking" component={OrderTrackingScreen} />
       <Stack.Screen name="Profile"       component={ProfileScreen} />
+      <Stack.Screen name="ProductDetail"  component={ProductDetailScreen} />
     </Stack.Navigator>
   );
 }
@@ -56,6 +58,7 @@ function OrdersStack() {
       <Stack.Screen name="OrderTracking" component={OrderTrackingScreen} />
       <Stack.Screen name="Shop"          component={ShopScreen} />
       <Stack.Screen name="Cart"          component={CartScreen} />
+      <Stack.Screen name="ProductDetail"  component={ProductDetailScreen} />
     </Stack.Navigator>
   );
 }
