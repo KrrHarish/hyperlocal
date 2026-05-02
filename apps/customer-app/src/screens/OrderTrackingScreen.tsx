@@ -37,15 +37,18 @@ const ACTIVE_STATUSES = ['pending', 'placed', 'confirmed', 'assigned', 'picked_u
 export default function OrderTrackingScreen({ route, navigation }: any) {
   const { orderId, status: passedStatus, orderData: passedOrderData } = route.params || {};
 
-  // Determine immediately if this is a past order from passed params
-  const isPastOrder = passedStatus && PAST_STATUSES.includes(passedStatus);
-
   const [step, setStep]       = useState(() => STEP_INDEX[passedStatus] ?? 0);
   const [order, setOrder]     = useState<any>(passedOrderData || null);
   const [loading, setLoading] = useState(!passedOrderData);
   const [showCancel, setShowCancel] = useState(false);
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const pollRef   = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Derive isPastOrder from live order status so cancellations during tracking update the UI
+  const currentStatus = order?.status || passedStatus;
+  const isPastOrder   = currentStatus && PAST_STATUSES.includes(currentStatus);
+  const isCancelled   = currentStatus === 'cancelled' || currentStatus === 'rejected';
+  const isDelivered   = step === 3 && !isCancelled;
 
   const fetchOrder = useCallback(async () => {
     try {
@@ -63,8 +66,9 @@ export default function OrderTrackingScreen({ route, navigation }: any) {
   }, [orderId]);
 
   useEffect(() => {
-    if (isPastOrder && passedOrderData) {
-      // Past order — no polling needed, we already have data
+    const isAlreadyPast = passedStatus && PAST_STATUSES.includes(passedStatus);
+    if (isAlreadyPast && passedOrderData) {
+      // Opened from history — no polling needed
       setLoading(false);
       return;
     }
@@ -72,9 +76,9 @@ export default function OrderTrackingScreen({ route, navigation }: any) {
     fetchOrder();
     pollRef.current = setInterval(fetchOrder, 5000);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [fetchOrder, isPastOrder, passedOrderData]);
+  }, [fetchOrder, passedStatus, passedOrderData]);
 
-  // Pulse animation only for active orders
+  // Stop pulse when order becomes past (cancelled/delivered)
   useEffect(() => {
     if (isPastOrder) return;
     const a = Animated.loop(Animated.sequence([
@@ -84,10 +88,6 @@ export default function OrderTrackingScreen({ route, navigation }: any) {
     a.start();
     return () => a.stop();
   }, [isPastOrder]);
-
-  const isCancelled = passedStatus === 'cancelled' || order?.status === 'cancelled';
-  const isDelivered = step === 3 && !isCancelled;
-  const finalStep   = isCancelled ? -1 : step;
 
   if (loading) {
     return (
