@@ -15,7 +15,10 @@ import { authRoutes } from './modules/auth/auth.routes'
 const server = Fastify({ logger: true })
 
 // Plugins
-server.register(cors, { origin: '*' })
+server.register(cors, {
+  origin: '*',
+  methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+})
 server.register(jwt, { secret: process.env.JWT_SECRET || 'secret' })
 
 // Routes — all mounted under /api to match the mobile client base URL

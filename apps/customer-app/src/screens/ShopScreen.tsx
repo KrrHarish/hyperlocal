@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   ActivityIndicator, Platform, TextInput, StatusBar,
@@ -6,7 +6,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useCart } from '../store/CartContext';
-import { getShopProducts } from '../services/api';
+import { getShopProducts, getShopById } from '../services/api';
 
 // ── Category emoji + colour map ─────────────────────────────────
 const CAT_META: Record<string, { emoji: string; color: string }> = {
@@ -64,12 +64,27 @@ function productBg(category: string): string {
 }
 
 export default function ShopScreen({ route, navigation }: any) {
-  const { shop } = route.params;
+  const { shop: initialShop } = route.params;
+  const [shop, setShop]           = useState(initialShop);
   const { addItem, updateQty, items, itemCount, total } = useCart();
   const [products, setProducts]   = useState<any[]>([]);
   const [loading, setLoading]     = useState(true);
   const [search, setSearch]       = useState('');
   const [activeTab, setActiveTab] = useState('All');
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Poll shop open/closed status every 15s
+  useEffect(() => {
+    const checkOpen = async () => {
+      try {
+        const res = await getShopById(initialShop.id);
+        const fresh = res.data?.shop;
+        if (fresh) setShop((prev: any) => ({ ...prev, is_open: fresh.is_open }));
+      } catch {}
+    };
+    pollRef.current = setInterval(checkOpen, 15000);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [initialShop.id]);
 
   useEffect(() => {
     (async () => {
@@ -116,6 +131,7 @@ export default function ShopScreen({ route, navigation }: any) {
     return acc;
   }, {});
 
+  const shopClosed   = !shop.is_open;
   const deliveryFee  = total >= 200 ? 0 : 40;
   const deliveryTime = shop.eta || '15–20 min';
   const rating       = shop.rating || 4.5;
@@ -224,6 +240,17 @@ export default function ShopScreen({ route, navigation }: any) {
         </View>
       </View>
 
+      {/* ── CLOSED BANNER ── */}
+      {shopClosed && (
+        <View style={s.closedBanner}>
+          <Text style={s.closedBannerIcon}>🔴</Text>
+          <View>
+            <Text style={s.closedBannerTitle}>Shop is currently closed</Text>
+            <Text style={s.closedBannerSub}>We'll be back soon. You can browse but can't order right now.</Text>
+          </View>
+        </View>
+      )}
+
       {/* ── CATEGORY TABS ── */}
       <View style={s.tabBar}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.tabContent}>
@@ -303,7 +330,11 @@ export default function ShopScreen({ route, navigation }: any) {
 
                     {/* Add / counter */}
                     <View style={s.pAction}>
-                      {!p.in_stock ? (
+                      {shopClosed ? (
+                        <View style={s.outBtn}>
+                          <Text style={s.outTxt}>Shop{'\n'}closed</Text>
+                        </View>
+                      ) : !p.in_stock ? (
                         <View style={s.outBtn}>
                           <Text style={s.outTxt}>Out of{'\n'}stock</Text>
                         </View>
@@ -344,7 +375,7 @@ export default function ShopScreen({ route, navigation }: any) {
       )}
 
       {/* ── VIEW CART BAR ── */}
-      {itemCount > 0 && (
+      {itemCount > 0 && !shopClosed && (
         <TouchableOpacity
           style={s.cartBar}
           onPress={() => navigation.navigate('Cart')}
@@ -421,6 +452,15 @@ const s = StyleSheet.create({
 
   addrRow:       { flexDirection: 'row', alignItems: 'center', gap: 5 },
   addrTxt:       { fontSize: 12, color: '#999', flex: 1 },
+
+  // Closed banner
+  closedBanner:       { flexDirection: 'row', alignItems: 'center', gap: 12,
+                         backgroundColor: '#FEF2F2', borderTopWidth: 1,
+                         borderBottomWidth: 1, borderColor: '#FEE2E2',
+                         paddingHorizontal: 16, paddingVertical: 14 },
+  closedBannerIcon:   { fontSize: 22 },
+  closedBannerTitle:  { fontSize: 14, fontWeight: '800', color: '#B91C1C', marginBottom: 2 },
+  closedBannerSub:    { fontSize: 12, color: '#EF4444', lineHeight: 16 },
 
   // Category tabs
   tabBar:        { backgroundColor: '#fff', borderBottomWidth: 0.5, borderBottomColor: '#ECECEC' },

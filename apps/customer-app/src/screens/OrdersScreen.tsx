@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  ActivityIndicator, RefreshControl, Platform,
+  ActivityIndicator, RefreshControl, Platform, Animated,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -42,18 +42,36 @@ function formatDate(iso: string | null | undefined): string {
 }
 
 export default function OrdersScreen({ navigation }: any) {
-  const [allOrders, setAllOrders]   = useState<any[]>([]);
-  const [loading, setLoading]       = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [tab, setTab]               = useState<'active'|'past'>('active');
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [allOrders, setAllOrders]       = useState<any[]>([]);
+  const [loading, setLoading]           = useState(true);
+  const [refreshing, setRefreshing]     = useState(false);
+  const [tab, setTab]                   = useState<'active'|'past'>('active');
+  const [cancelledAlert, setCancelledAlert] = useState<any | null>(null);
+  const slideAnim = useRef(new Animated.Value(-100)).current;
+  const pollRef      = useRef<ReturnType<typeof setInterval> | null>(null);
+  const prevStatuses = useRef<Record<string, string>>({});
+  const isFirstFetch = useRef(true);
 
   const fetchOrders = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
     try {
       const res = await getMyOrders();
-      const list = res.data?.orders || res.data?.data || res.data || [];
-      setAllOrders(Array.isArray(list) ? list : []);
+      const list: any[] = res.data?.orders || res.data?.data || res.data || [];
+      if (Array.isArray(list)) {
+        // Detect orders that just got cancelled
+        if (!isFirstFetch.current) {
+          const justCancelled = list.find(
+            o => o.status === 'cancelled' && prevStatuses.current[o.id] &&
+                 prevStatuses.current[o.id] !== 'cancelled'
+          );
+          if (justCancelled) setCancelledAlert(justCancelled);
+        }
+        isFirstFetch.current = false;
+        const newStatuses: Record<string, string> = {};
+        list.forEach(o => { newStatuses[o.id] = o.status; });
+        prevStatuses.current = newStatuses;
+        setAllOrders(list);
+      }
     } catch {
       setAllOrders([]);
     } finally {
@@ -70,6 +88,19 @@ export default function OrdersScreen({ navigation }: any) {
 
   // Refetch immediately whenever the tab comes into focus
   useFocusEffect(useCallback(() => { fetchOrders(); }, [fetchOrders]));
+
+  // Animate cancellation banner in/out
+  useEffect(() => {
+    if (cancelledAlert) {
+      Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, tension: 100, friction: 12 }).start();
+      const t = setTimeout(() => {
+        Animated.timing(slideAnim, { toValue: -100, duration: 250, useNativeDriver: true }).start(() => setCancelledAlert(null));
+      }, 5000);
+      return () => clearTimeout(t);
+    } else {
+      slideAnim.setValue(-100);
+    }
+  }, [cancelledAlert]);
 
   // Auto switch to active tab if active orders exist
   useEffect(() => {
@@ -95,6 +126,55 @@ export default function OrdersScreen({ navigation }: any) {
 
   return (
     <View style={s.root}>
+
+      {/* Cancellation notification */}
+      <Animated.View style={{
+        position: 'absolute',
+        top: 0, left: 0, right: 0,
+        zIndex: 999,
+        transform: [{ translateY: slideAnim }],
+        elevation: 10,
+      }}>
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={() => {
+            setCancelledAlert(null);
+            navigation.navigate('OrderTracking', {
+              orderId: cancelledAlert?.id,
+              status: 'cancelled',
+              orderData: cancelledAlert,
+            });
+          }}
+          style={{
+            backgroundColor: '#B91C1C',
+            paddingTop: Platform.OS === 'ios' ? 52 : 14,
+            paddingBottom: 14,
+            paddingHorizontal: 16,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 12,
+          }}
+        >
+          <Ionicons name="close-circle" size={28} color="rgba(255,255,255,0.9)" />
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>
+              Order Cancelled by Shop
+            </Text>
+            {cancelledAlert?.cancellation_reason ? (
+              <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.75)', marginTop: 2 }} numberOfLines={1}>
+                {cancelledAlert.cancellation_reason}
+              </Text>
+            ) : null}
+          </View>
+          <TouchableOpacity
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            onPress={() => setCancelledAlert(null)}
+          >
+            <Ionicons name="close" size={20} color="rgba(255,255,255,0.7)" />
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Animated.View>
+
       {/* Header */}
       <LinearGradient colors={['#FF8A00','#FF5C00']} style={s.header}>
         <View style={s.hTop}>

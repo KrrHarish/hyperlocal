@@ -45,6 +45,9 @@ export const verifyOTP = (phone: string, otp: string) =>
 export const getNearbyShops = (lat: number, lng: number, radius = 3000) =>
   api.get('/shops/nearby', { params: { lat, lng, radius } });
 
+export const getShopById = (shopId: string) =>
+  api.get(`/shops/${shopId}`);
+
 export const getShopProducts = (shopId: string) =>
   api.get(`/shops/${shopId}/products`);
 

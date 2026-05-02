@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { registerPushToken } from '../utils/registerPushToken';
 
 interface AuthState {
   token: string | null;
@@ -36,6 +37,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       ['zuqu_phone',   phone],
     ]);
     setState({ token, userId, phone, isLoading: false });
+    // Register Expo push token so we can receive order notifications
+    registerPushToken().catch(() => {})
   };
 
   const logout = async () => {

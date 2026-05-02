@@ -1,4 +1,6 @@
 import { db } from '../../shared/db/knex'
+import { sendPushToShop } from '../../shared/push'
+import { sendPushToCustomer } from '../../shared/expoPush'
 
 // Calculate delivery fee based on distance (simple for prototype)
 function calculateDeliveryFee(orderTotal: number): number {
@@ -85,14 +87,30 @@ export async function placeOrder(customerId: string, data: {
     return newOrder
   })
 
+  // Fire push notification to shop (non-blocking)
+  sendPushToShop(data.shop_id, {
+    type: 'new_order',
+    title: '🔔 New Order!',
+    body: `${orderItems.length} item${orderItems.length !== 1 ? 's' : ''} — ₹${totalAmount}`,
+    orderId: order.id,
+  }).catch(() => {})
+
   return { order, delivery_otp: deliveryOtp }
 }
 
 export async function getOrder(orderId: string) {
   const order = await db('orders as o')
     .join('shops as s', 's.id', 'o.shop_id')
+    .leftJoin('riders as r', 'r.id', 'o.rider_id')
     .where({ 'o.id': orderId })
-    .select('o.*', 's.name as shop_name', db.raw('o.total_amount as total'))
+    .select(
+      'o.*',
+      's.name as shop_name',
+      db.raw('o.total_amount as total'),
+      'r.name as rider_name',
+      'r.phone as rider_phone',
+      'r.vehicle_type as rider_vehicle',
+    )
     .first()
   if (!order) throw new Error('Order not found')
 
@@ -133,18 +151,58 @@ export async function getShopOrders(shopId: string, status?: string) {
 }
 
 export async function updateOrderStatus(orderId: string, status: string, extra = {}) {
+  const now = new Date()
   const timestamps: Record<string, any> = {
-    confirmed:  { confirmed_at: new Date() },
-    assigned:   { assigned_at: new Date() },
-    picked_up:  { picked_up_at: new Date() },
-    delivered:  { delivered_at: new Date() },
-    cancelled:  { cancelled_at: new Date() },
+    confirmed:  { confirmed_at: now },
+    assigned:   { assigned_at: now },
+    picked_up:  { picked_up_at: now },
+    delivered:  { delivered_at: now },
+    cancelled:  { cancelled_at: now },
+  }
+
+  // Auto-assign an available rider when shop confirms the order
+  if (status === 'confirmed') {
+    const activeRiderIds = db('orders')
+      .whereIn('status', ['assigned', 'picked_up'])
+      .whereNotNull('rider_id')
+      .select('rider_id')
+
+    const rider = await db('riders')
+      .where({ is_online: true, is_verified: true, is_suspended: false })
+      .whereNotIn('id', activeRiderIds)
+      .first()
+
+    if (rider) {
+      const [updated] = await db('orders')
+        .where({ id: orderId })
+        .update({
+          status: 'assigned',
+          rider_id: rider.id,
+          confirmed_at: now,
+          assigned_at: now,
+          ...extra,
+        })
+        .returning('*')
+      return updated
+    }
   }
 
   const [updated] = await db('orders')
     .where({ id: orderId })
     .update({ status, ...timestamps[status], ...extra })
     .returning('*')
+
+  // Notify customer on cancellation
+  if (status === 'cancelled') {
+    const order = await db('orders').where({ id: orderId }).first()
+    if (order?.customer_id) {
+      sendPushToCustomer(order.customer_id, {
+        title: '❌ Order Cancelled',
+        body: 'Your order was cancelled by the shop. Tap to see details.',
+        data: { orderId, type: 'order_cancelled' },
+      }).catch(() => {})
+    }
+  }
 
   return updated
 }

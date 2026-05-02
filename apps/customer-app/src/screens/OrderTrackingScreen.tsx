@@ -15,7 +15,8 @@ const STEPS = [
   { key:'delivered', label:'Delivered',        sub:'Order delivered successfully', color:'#8B5CF6', icon:'gift-outline'             },
 ];
 
-const STEP_INDEX: any = { placed:0, confirmed:1, picked_up:2, delivered:3 };
+// assigned = rider assigned by shop (maps to "Shop Confirmed" step)
+const STEP_INDEX: any = { placed:0, confirmed:1, assigned:1, picked_up:2, delivered:3 };
 
 const PAST_STATUSES   = ['delivered', 'cancelled', 'rejected', 'failed'];
 
@@ -129,13 +130,23 @@ export default function OrderTrackingScreen({ route, navigation }: any) {
           {/* Status banner */}
           <View style={[s.pastBanner, isCancelled && s.pastBannerCancelled]}>
             <Text style={s.pastBannerEmoji}>{isCancelled ? '❌' : '✅'}</Text>
-            <View>
+            <View style={{ flex: 1 }}>
               <Text style={[s.pastBannerTitle, isCancelled && { color:'#B91C1C' }]}>
                 {isCancelled ? 'Order was cancelled' : 'Successfully delivered'}
               </Text>
               <Text style={s.pastBannerSub}>
                 {order?.created_at || passedOrderData?.created_at || 'Previously'}
               </Text>
+              {isCancelled && (order?.cancellation_reason || passedOrderData?.cancellation_reason) && (
+                <View style={{ marginTop: 8, backgroundColor: '#FEE2E2', borderRadius: 8, padding: 10 }}>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#991B1B', marginBottom: 2, textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                    Reason
+                  </Text>
+                  <Text style={{ fontSize: 13, color: '#B91C1C', fontWeight: '600' }}>
+                    {order?.cancellation_reason || passedOrderData?.cancellation_reason}
+                  </Text>
+                </View>
+              )}
             </View>
           </View>
 
@@ -264,11 +275,19 @@ export default function OrderTrackingScreen({ route, navigation }: any) {
             </Text>
           </View>
         )}
-        {step === 1 && (
+        {step === 1 && !order?.rider_name && (
           <View style={[s.noticeCard, { backgroundColor:'#EFF6FF', borderColor:'#BFDBFE' }]}>
             <Ionicons name="bicycle-outline" size={18} color="#3B82F6" />
             <Text style={[s.noticeTxt, { color:'#1D4ED8' }]}>
-              Looking for a nearby rider to pick up your order
+              Shop confirmed! Looking for a nearby rider…
+            </Text>
+          </View>
+        )}
+        {step === 1 && order?.rider_name && (
+          <View style={[s.noticeCard, { backgroundColor:'#F0FDF4', borderColor:'#BBF7D0' }]}>
+            <Ionicons name="checkmark-circle-outline" size={18} color="#16A34A" />
+            <Text style={[s.noticeTxt, { color:'#15803D' }]}>
+              Shop confirmed! <Text style={{ fontWeight:'700' }}>{order.rider_name}</Text> has been assigned to your order
             </Text>
           </View>
         )}
@@ -326,17 +345,17 @@ export default function OrderTrackingScreen({ route, navigation }: any) {
           })}
         </View>
 
-        {/* Rider card */}
-        {step >= 2 && !isDelivered && (
+        {/* Rider card — show as soon as rider is assigned */}
+        {step >= 1 && !isDelivered && order?.rider_name && (
           <View style={s.riderCard}>
             <View style={s.riderAvatar}>
-              <Text style={{ fontSize:26 }}>👨‍🦱</Text>
+              <Text style={{ fontSize:26 }}>🛵</Text>
             </View>
             <View style={{ flex:1 }}>
-              <Text style={s.riderName}>Ravi Kumar</Text>
+              <Text style={s.riderName}>{order.rider_name}</Text>
               <View style={s.riderMeta}>
-                <Ionicons name="star" size={12} color="#F59E0B" />
-                <Text style={s.riderSub}>4.9  ·  KA 01 AB 1234</Text>
+                <Ionicons name="call-outline" size={12} color="#888" />
+                <Text style={s.riderSub}>{order.rider_phone}</Text>
               </View>
             </View>
             <TouchableOpacity style={s.callBtn}>

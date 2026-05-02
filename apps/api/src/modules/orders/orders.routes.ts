@@ -7,8 +7,25 @@ import {
   updateOrderStatus,
   verifyDeliveryOTP,
 } from './orders.service'
+import { db } from '../../shared/db/knex'
 
 export async function orderRoutes(server: FastifyInstance) {
+
+  // POST /customers/push-token — save customer Expo push token
+  server.post('/customers/push-token', async (req, reply) => {
+    try {
+      await req.jwtVerify()
+    } catch {
+      return reply.status(401).send({ error: 'Unauthorized' })
+    }
+    const user = req.user as { id: string }
+    const { token, platform } = req.body as { token: string; platform?: string }
+    if (!token) return reply.status(400).send({ error: 'token required' })
+    await db('customer_push_tokens')
+      .insert({ customer_id: user.id, token, platform: platform ?? 'unknown' })
+      .onConflict(['customer_id', 'token']).ignore()
+    return reply.send({ ok: true })
+  })
 
   // POST /orders — customer places an order
   server.post('/orders', async (request, reply) => {

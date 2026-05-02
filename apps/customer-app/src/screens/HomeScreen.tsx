@@ -429,10 +429,11 @@ export default function HomeScreen({ navigation }: any) {
                     const emoji = productEmoji(p.name, p.category);
                     const qty = getCartQty(p.id);
                     const isOos = p.stock_status === 'out_of_stock';
+                    const shopClosed = p.shop_is_open === false;
                     return (
                       <TouchableOpacity
                         key={p.id}
-                        style={[s.productCard, isOos && { opacity: 0.55 }]}
+                        style={[s.productCard, (isOos || shopClosed) && { opacity: 0.55 }]}
                         activeOpacity={0.85}
                         onPress={() => navigation.navigate('Shop', {
                           shop: { id: p.shop_id, name: p.shop_name, address: p.shop_address,
@@ -447,12 +448,17 @@ export default function HomeScreen({ navigation }: any) {
                               <Text style={s.productBadgeTxt}>OUT OF STOCK</Text>
                             </View>
                           )}
+                          {shopClosed && !isOos && (
+                            <View style={[s.productBadge, { backgroundColor:'#6B7280' }]}>
+                              <Text style={s.productBadgeTxt}>SHOP CLOSED</Text>
+                            </View>
+                          )}
                         </View>
                         <Text style={s.productName} numberOfLines={2}>{p.name}</Text>
                         <Text style={s.productShop} numberOfLines={1}>📍 {p.shop_name}</Text>
                         <View style={s.productBottom}>
                           <Text style={s.productPrice}>₹{p.price}</Text>
-                          {!isOos && (
+                          {!isOos && !shopClosed && (
                             qty > 0 ? (
                               <View style={s.miniCounter}>
                                 <TouchableOpacity style={s.miniBtn}

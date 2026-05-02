@@ -53,7 +53,20 @@ export default function CartScreen({ navigation }: any) {
       const orderId = res.data?.order?.id || res.data?.order_id || res.data?.id;
       if (!orderId) throw new Error('No order ID returned from server');
       clearCart();
-      navigation.replace('OrderTracking', { orderId, status: 'pending' });
+      // Navigate to Orders tab so tracking shows under the right tab
+      navigation.reset({
+        index: 0,
+        routes: [{
+          name: 'OrdersTab',
+          state: {
+            routes: [
+              { name: 'OrdersList' },
+              { name: 'OrderTracking', params: { orderId, status: 'pending' } },
+            ],
+            index: 1,
+          },
+        }],
+      });
     } catch (err: any) {
       const msg = err?.response?.data?.error || err?.message || 'Could not place order. Please try again.';
       Alert.alert('Order Failed', msg);

@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "nodemon --watch src --ext ts --exec ts-node src/index.ts",
     "migrate": "ts-node src/shared/db/migrate.ts",
-     "seed": "ts-node src/modules/products/seed.ts",
+    "seed": "ts-node src/modules/products/seed.ts",
     "build": "tsc",
     "start": "node dist/index.js"
   },
@@ -22,11 +22,13 @@
     "fastify": "^5.8.5",
     "ioredis": "^5.10.1",
     "knex": "^3.2.9",
-    "pg": "^8.20.0"
+    "pg": "^8.20.0",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@types/ioredis": "^5.0.0",
     "@types/node": "^25.6.0",
+    "@types/web-push": "^3.6.4",
     "nodemon": "^3.1.14",
     "ts-node": "^10.9.2",
     "typescript": "^6.0.3"
