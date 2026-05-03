@@ -14,18 +14,17 @@ function playChime() {
     const ctx = getAudioCtx()
     if (ctx.state === 'suspended') ctx.resume()
 
-    // Compressor keeps it loud without clipping
+    // Hard limiter so it's loud but never clips
     const comp = ctx.createDynamicsCompressor()
-    comp.threshold.value = -6
-    comp.knee.value      = 3
-    comp.ratio.value     = 4
+    comp.threshold.value = -3
+    comp.knee.value      = 1
+    comp.ratio.value     = 20
     comp.attack.value    = 0.001
-    comp.release.value   = 0.15
+    comp.release.value   = 0.1
     comp.connect(ctx.destination)
 
-    // Master gain boost
     const master = ctx.createGain()
-    master.gain.value = 1.8
+    master.gain.value = 3.0   // ← max volume
     master.connect(comp)
 
     const notes = [523.25, 659.25, 783.99, 1046.5]
@@ -37,18 +36,27 @@ function playChime() {
       osc1.connect(g1); g1.connect(master)
       osc1.type = 'sine'; osc1.frequency.value = freq
       g1.gain.setValueAtTime(0, t)
-      g1.gain.linearRampToValueAtTime(1.0, t + 0.02)
-      g1.gain.exponentialRampToValueAtTime(0.001, t + 0.5)
-      osc1.start(t); osc1.stop(t + 0.5)
+      g1.gain.linearRampToValueAtTime(1.0, t + 0.01)
+      g1.gain.exponentialRampToValueAtTime(0.001, t + 0.6)
+      osc1.start(t); osc1.stop(t + 0.6)
 
-      // 2nd harmonic for body
+      // 2nd harmonic for richness
       const osc2 = ctx.createOscillator(), g2 = ctx.createGain()
       osc2.connect(g2); g2.connect(master)
       osc2.type = 'sine'; osc2.frequency.value = freq * 2
       g2.gain.setValueAtTime(0, t)
-      g2.gain.linearRampToValueAtTime(0.3, t + 0.02)
-      g2.gain.exponentialRampToValueAtTime(0.001, t + 0.35)
-      osc2.start(t); osc2.stop(t + 0.35)
+      g2.gain.linearRampToValueAtTime(0.5, t + 0.01)
+      g2.gain.exponentialRampToValueAtTime(0.001, t + 0.4)
+      osc2.start(t); osc2.stop(t + 0.4)
+
+      // 3rd harmonic for presence
+      const osc3 = ctx.createOscillator(), g3 = ctx.createGain()
+      osc3.connect(g3); g3.connect(master)
+      osc3.type = 'triangle'; osc3.frequency.value = freq * 3
+      g3.gain.setValueAtTime(0, t)
+      g3.gain.linearRampToValueAtTime(0.25, t + 0.01)
+      g3.gain.exponentialRampToValueAtTime(0.001, t + 0.25)
+      osc3.start(t); osc3.stop(t + 0.25)
     })
   } catch {}
 }
@@ -105,36 +113,45 @@ export default function Layout() {
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
   const [soundEnabled, setSoundEnabled]   = useState(false)
   const [notifEnabled, setNotifEnabled]   = useState(() => Notification.permission === 'granted')
-  const prevPendingIds = useRef<Set<string>>(new Set())
-  const isFirstPoll    = useRef(true)
-  const pushSubRef     = useRef<PushSubscription | null>(null)
+  const pushSubRef      = useRef<PushSubscription | null>(null)
+  const soundEnabledRef = useRef(soundEnabled)
+  useEffect(() => { soundEnabledRef.current = soundEnabled }, [soundEnabled])
 
-  // Global new-order polling — runs on every page
+  // Real-time new-order alerts via WebSocket — no polling
   useEffect(() => {
     if (!shop) return
 
-    const poll = async () => {
-      try {
-        const res = await api.get(`/shops/${shop.id}/orders`)
-        const orders: any[] = res.data.orders ?? []
-        const pending = orders.filter(o => o.status === 'pending')
-        const currentIds = new Set(pending.map((o: any) => o.id))
-        if (!isFirstPoll.current) {
-          const newOrders = pending.filter(o => !prevPendingIds.current.has(o.id))
-          if (newOrders.length > 0) {
-            if (soundEnabled) playChime()
-            showOrderNotification(newOrders)
+    let ws: WebSocket | null = null
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+    let destroyed = false
+
+    const connect = () => {
+      if (destroyed) return
+      ws = new WebSocket('ws://localhost:3000/ws')
+
+      ws.onmessage = (e) => {
+        try {
+          const event = JSON.parse(e.data)
+          if (event.type === 'order_created' && event.shopId === shop.id) {
+            if (soundEnabledRef.current) playChime()
+            showOrderNotification([{ preview: event.preview, total_amount: event.total }])
           }
-        }
-        isFirstPoll.current = false
-        prevPendingIds.current = currentIds
-      } catch {}
+        } catch {}
+      }
+
+      ws.onclose = () => {
+        if (!destroyed) reconnectTimer = setTimeout(connect, 2000)
+      }
+      ws.onerror = () => ws?.close()
     }
 
-    poll()
-    const timer = window.setInterval(poll, 8000)
-    return () => { clearInterval(timer) }
-  }, [shop, soundEnabled])
+    connect()
+    return () => {
+      destroyed = true
+      if (reconnectTimer) clearTimeout(reconnectTimer)
+      ws?.close()
+    }
+  }, [shop])
 
   const handleLogout = () => {
     logout()
@@ -379,64 +396,6 @@ export default function Layout() {
             </div>
           )}
 
-          {/* Test sound */}
-          {soundEnabled && (
-            <button
-              onClick={() => playChime()}
-              style={{
-                width: '100%', padding: '7px 12px', borderRadius: 8,
-                background: 'transparent',
-                border: '1px solid rgba(255,255,255,0.1)',
-                color: 'rgba(255,255,255,0.4)',
-                fontSize: 12, fontWeight: 500, cursor: 'pointer',
-                display: 'flex', alignItems: 'center', gap: 8,
-                fontFamily: 'inherit',
-              }}
-            >
-              <span>▶</span> Test Sound
-            </button>
-          )}
-
-          {/* Test notification */}
-          {notifEnabled && (
-            <button
-              onClick={async () => {
-                console.log('=== NOTIF DEBUG ===')
-                console.log('Notification.permission:', Notification.permission)
-                console.log('serviceWorker supported:', 'serviceWorker' in navigator)
-                try {
-                  const reg = await navigator.serviceWorker.ready
-                  console.log('SW state:', reg.active?.state)
-                  await reg.showNotification('🛒 New Order Received!', {
-                    body: '📦 Table Water 500ml × 2, Chips × 1\n💰 ₹340\n👆 Tap to open Orders',
-                    icon: '/icon-192.png',
-                    badge: '/icon-192.png',
-                    tag: 'notif-test',
-                    requireInteraction: true,
-                    actions: [
-                      { action: 'view', title: '📋 View Orders' },
-                      { action: 'dismiss', title: 'Dismiss' },
-                    ],
-                  } as any)
-                  console.log('showNotification() called — done')
-                } catch (e: any) {
-                  console.error('FAILED:', e)
-                  alert('Notification failed: ' + e?.message)
-                }
-              }}
-              style={{
-                width: '100%', padding: '7px 12px', borderRadius: 8,
-                background: 'transparent',
-                border: '1px solid rgba(255,255,255,0.1)',
-                color: 'rgba(255,255,255,0.4)',
-                fontSize: 12, fontWeight: 500, cursor: 'pointer',
-                display: 'flex', alignItems: 'center', gap: 8,
-                fontFamily: 'inherit',
-              }}
-            >
-              <span>▶</span> Test Alert
-            </button>
-          )}
         </div>
 
         {/* Logout */}

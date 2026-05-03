@@ -3,6 +3,10 @@ import {
   View, Text, StyleSheet, TouchableOpacity, Animated,
   ScrollView, Platform, ActivityIndicator,
 } from 'react-native';
+
+const WS_URL = Platform.OS === 'android'
+  ? 'ws://10.0.2.2:3000/ws'
+  : 'ws://localhost:3000/ws';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { getOrderById, cancelOrder } from '../services/api';
@@ -41,8 +45,8 @@ export default function OrderTrackingScreen({ route, navigation }: any) {
   const [order, setOrder]     = useState<any>(passedOrderData || null);
   const [loading, setLoading] = useState(!passedOrderData);
   const [showCancel, setShowCancel] = useState(false);
-  const pulseAnim = useRef(new Animated.Value(1)).current;
-  const pollRef   = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pulseAnim  = useRef(new Animated.Value(1)).current;
+  const mountedRef = useRef(true);
 
   // Derive isPastOrder from live order status so cancellations during tracking update the UI
   const currentStatus = order?.status || passedStatus;
@@ -57,8 +61,9 @@ export default function OrderTrackingScreen({ route, navigation }: any) {
       if (o) {
         setOrder(o);
         setStep(STEP_INDEX[o.status] ?? 0);
+        // Stop reconnecting once order is in a terminal state
         if (PAST_STATUSES.includes(o.status)) {
-          if (pollRef.current) clearInterval(pollRef.current);
+          mountedRef.current = false;
         }
       }
     } catch {}
@@ -66,17 +71,47 @@ export default function OrderTrackingScreen({ route, navigation }: any) {
   }, [orderId]);
 
   useEffect(() => {
+    mountedRef.current = true;
     const isAlreadyPast = passedStatus && PAST_STATUSES.includes(passedStatus);
     if (isAlreadyPast && passedOrderData) {
-      // Opened from history — no polling needed
+      // Opened from history — no live connection needed
       setLoading(false);
-      return;
+      return () => { mountedRef.current = false; };
     }
-    // Active order — fetch immediately and poll every 5s
+
+    // Active order — fetch immediately then keep live via WebSocket
     fetchOrder();
-    pollRef.current = setInterval(fetchOrder, 5000);
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [fetchOrder, passedStatus, passedOrderData]);
+
+    let ws: WebSocket | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const connect = () => {
+      if (!mountedRef.current) return;
+      ws = new WebSocket(WS_URL);
+      ws.onmessage = (e) => {
+        try {
+          const event = JSON.parse(e.data);
+          if (
+            (event.type === 'order_updated' || event.type === 'order_created') &&
+            event.orderId === orderId
+          ) {
+            fetchOrder();
+          }
+        } catch {}
+      };
+      ws.onclose = () => {
+        if (mountedRef.current) reconnectTimer = setTimeout(connect, 2000);
+      };
+      ws.onerror = () => ws?.close();
+    };
+
+    connect();
+    return () => {
+      mountedRef.current = false;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      ws?.close();
+    };
+  }, [fetchOrder, passedStatus, passedOrderData, orderId]);
 
   // Stop pulse when order becomes past (cancelled/delivered)
   useEffect(() => {
@@ -414,8 +449,7 @@ export default function OrderTrackingScreen({ route, navigation }: any) {
         onClose={() => setShowCancel(false)}
         onCancelled={() => {
           setShowCancel(false);
-          setStep(-1); // show cancelled state
-          if (pollRef.current) clearInterval(pollRef.current);
+          mountedRef.current = false; // stop reconnects
           navigation.goBack();
         }}
       />

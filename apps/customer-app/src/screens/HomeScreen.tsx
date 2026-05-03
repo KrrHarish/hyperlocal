@@ -3,7 +3,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import {
   View, Text, ScrollView, TouchableOpacity,
   StyleSheet, RefreshControl, ActivityIndicator,
-  Dimensions, FlatList, ViewToken,
+  Dimensions, FlatList, ViewToken, Image,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
@@ -11,6 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { getNearbyShops, getProductsByCategory } from '../services/api';
 import { useCart } from '../store/CartContext';
+import { useProductSocket } from '../hooks/useProductSocket';
 
 const { width: W } = Dimensions.get('window');
 
@@ -193,17 +194,13 @@ export default function HomeScreen({ navigation }: any) {
   // Re-fetch when category changes (show spinner) or screen comes back into focus
   useEffect(() => { fetchCatProducts(true); }, [category]);
 
-  // Poll every 10 s while screen is visible — updates stock tags without user doing anything
-  const catPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  useFocusEffect(
-    useCallback(() => {
-      fetchCatProducts(false);                          // immediate silent refresh on focus
-      catPollRef.current = setInterval(() => fetchCatProducts(false), 10_000);
-      return () => {
-        if (catPollRef.current) clearInterval(catPollRef.current);
-      };
-    }, [fetchCatProducts])
-  );
+  // Re-fetch immediately when screen comes back into focus
+  useFocusEffect(useCallback(() => { fetchCatProducts(false); }, [fetchCatProducts]));
+
+  // WebSocket: instantly re-fetch category products when any product changes
+  useProductSocket(useCallback(() => {
+    if (category !== 'all') fetchCatProducts(false);
+  }, [category, fetchCatProducts]));
 
   const getCartQty = (productId: string) =>
     items.find(i => i.product_id === productId)?.quantity || 0;
@@ -448,20 +445,31 @@ export default function HomeScreen({ navigation }: any) {
                     const isOos  = p.stock_status === 'out_of_stock';
                     const isLow  = p.stock_status === 'low' || p.stock_status === 'low_stock';
                     const shopClosed = p.shop_is_open === false;
+                    const imageUri = p.custom_image_url
+                      ? `http://localhost:3000${p.custom_image_url}`
+                      : p.image_url || null;
                     return (
                       <TouchableOpacity
                         key={p.id}
                         style={[s.productCard, (isOos || shopClosed) && { opacity: 0.55 }]}
                         activeOpacity={0.85}
                         onPress={() => navigation.navigate('ProductDetail', {
-                          product: { ...p, emoji },
+                          product: { ...p, emoji, imageUri },
                           shop: { id: p.shop_id, name: p.shop_name, address: p.shop_address,
                                   rating: p.shop_rating, is_open: p.shop_is_open,
                                   eta: '10–15 min', distance: 'Nearby', category: p.category }
                         })}
                       >
                         <View style={s.productImgWrap}>
-                          <Text style={s.productEmoji}>{emoji}</Text>
+                          {imageUri ? (
+                            <Image
+                              source={{ uri: imageUri }}
+                              style={s.productImg}
+                              resizeMode="cover"
+                            />
+                          ) : (
+                            <Text style={s.productEmoji}>{emoji}</Text>
+                          )}
                           {isOos && (
                             <View style={[s.productBadge, { backgroundColor:'#EF4444' }]}>
                               <Text style={s.productBadgeTxt}>OUT OF STOCK</Text>
@@ -741,6 +749,7 @@ const s = StyleSheet.create({
   productGrid:    { flexDirection:'row', flexWrap:'wrap', gap:10, marginBottom:8 },
   productCard:    { width:(W-42)/2, backgroundColor:'#fff', borderRadius:16, padding:12,
                      shadowColor:'#000', shadowOpacity:0.05, shadowRadius:8, shadowOffset:{width:0,height:2} },
+  productImg:     { width:'100%', height:90, borderRadius:12 },
   productImgWrap: { width:'100%', height:90, backgroundColor:'#FFF4E6', borderRadius:12,
                      alignItems:'center', justifyContent:'center', marginBottom:8, overflow:'hidden' },
   productEmoji:   { fontSize:40 },

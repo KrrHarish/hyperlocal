@@ -1,6 +1,7 @@
 import { db } from '../../shared/db/knex'
 import { sendPushToShop } from '../../shared/push'
 import { sendPushToCustomer } from '../../shared/expoPush'
+import { broadcast } from '../../shared/realtime'
 
 // Calculate delivery fee based on distance (simple for prototype)
 function calculateDeliveryFee(orderTotal: number): number {
@@ -87,7 +88,17 @@ export async function placeOrder(customerId: string, data: {
     return newOrder
   })
 
-  // Fire push notification to shop (non-blocking)
+  // Real-time broadcast to any connected shop portal tab
+  const preview = orderItems.map(i => `${i.product_name} ×${i.quantity}`).join(', ')
+  broadcast({
+    type: 'order_created',
+    shopId: data.shop_id,
+    orderId: order.id,
+    total: totalAmount,
+    preview,
+  })
+
+  // Web push for when portal tab is closed (non-blocking)
   sendPushToShop(data.shop_id, {
     type: 'new_order',
     title: '🔔 New Order!',
@@ -183,6 +194,7 @@ export async function updateOrderStatus(orderId: string, status: string, extra =
           ...extra,
         })
         .returning('*')
+      broadcast({ type: 'order_updated', orderId, status: 'assigned', shopId: updated?.shop_id })
       return updated
     }
   }
@@ -191,6 +203,9 @@ export async function updateOrderStatus(orderId: string, status: string, extra =
     .where({ id: orderId })
     .update({ status, ...timestamps[status], ...extra })
     .returning('*')
+
+  // Broadcast real-time status change to shop portal
+  broadcast({ type: 'order_updated', orderId, status, shopId: updated?.shop_id })
 
   // Notify customer on cancellation
   if (status === 'cancelled') {

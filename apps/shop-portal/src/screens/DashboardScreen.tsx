@@ -239,11 +239,40 @@ export default function DashboardScreen() {
   // Wrap initial call to show spinner only on first load
   const fetchOrdersInitial = useCallback(() => fetchOrders(true), [fetchOrders])
 
+  // WebSocket — real-time updates (no polling)
   useEffect(() => {
     fetchOrdersInitial()
-    const timer = window.setInterval(fetchOrders, 8000)
-    return () => clearInterval(timer)
-  }, [fetchOrders, fetchOrdersInitial])
+    if (!shop) return
+
+    let ws: WebSocket | null = null
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+    let destroyed = false
+
+    const connect = () => {
+      if (destroyed) return
+      ws = new WebSocket('ws://localhost:3000/ws')
+      ws.onmessage = (e) => {
+        try {
+          const event = JSON.parse(e.data)
+          if (
+            (event.type === 'order_created' || event.type === 'order_updated') &&
+            event.shopId === shop.id
+          ) {
+            fetchOrders(false)
+          }
+        } catch {}
+      }
+      ws.onclose = () => { if (!destroyed) reconnectTimer = setTimeout(connect, 2000) }
+      ws.onerror = () => ws?.close()
+    }
+
+    connect()
+    return () => {
+      destroyed = true
+      if (reconnectTimer) clearTimeout(reconnectTimer)
+      ws?.close()
+    }
+  }, [shop, fetchOrders, fetchOrdersInitial])
 
   const rangeOrders  = allOrders.filter(o => inRange(o.created_at, range, customFrom, customTo))
   const filtered     = statusFilter === 'all' ? rangeOrders : rangeOrders.filter(o => o.status === statusFilter)

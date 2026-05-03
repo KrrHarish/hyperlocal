@@ -1,11 +1,20 @@
 import { FastifyInstance } from 'fastify'
+import path from 'path'
+import fs from 'fs'
+import { pipeline } from 'stream/promises'
+import { broadcast } from '../../shared/realtime'
 import {
   searchMasterCatalog,
   addProductToShop,
+  addCustomProductToShop,
   getShopProducts,
   getProductsByCategory,
-  updateStockStatus
+  updateStockStatus,
+  updateShopProduct,
+  removeShopProduct,
 } from './products.service'
+
+const UPLOADS_DIR = path.join(process.cwd(), 'public', 'uploads')
 
 export async function productRoutes(server: FastifyInstance) {
 
@@ -72,6 +81,22 @@ export async function productRoutes(server: FastifyInstance) {
     }
   })
 
+  // POST /shops/:shopId/products/custom  — add a brand-new custom product
+  server.post('/shops/:shopId/products/custom', async (request, reply) => {
+    try { await request.jwtVerify() } catch { return reply.status(401).send({ error: 'Unauthorized' }) }
+    const { shopId } = request.params as { shopId: string }
+    const body = request.body as { name: string; brand?: string; category: string; unit?: string; price: number }
+    if (!body.name?.trim() || !body.category || !body.price) {
+      return reply.status(400).send({ error: 'name, category, and price are required' })
+    }
+    try {
+      const product = await addCustomProductToShop(shopId, body)
+      return reply.status(201).send({ message: 'Custom product added', product })
+    } catch (err: any) {
+      return reply.status(500).send({ error: err.message })
+    }
+  })
+
   // PATCH /shops/:shopId/products/:productId/stock
   server.patch('/shops/:shopId/products/:productId/stock', async (request, reply) => {
     try {
@@ -88,6 +113,51 @@ export async function productRoutes(server: FastifyInstance) {
     }
 
     const updated = await updateStockStatus(productId, shopId, status)
+    broadcast({ type: 'product_updated', shopId, productId, stock_status: status })
     return reply.send({ message: 'Stock updated', product: updated })
+  })
+
+  // PATCH /shops/:shopId/products/:productId  — update price, name, brand, unit
+  server.patch('/shops/:shopId/products/:productId', async (request, reply) => {
+    try { await request.jwtVerify() } catch { return reply.status(401).send({ error: 'Unauthorized' }) }
+    const { shopId, productId } = request.params as { shopId: string; productId: string }
+    const { price, name, brand, unit } = request.body as { price?: number; name?: string; brand?: string; unit?: string }
+    if (price !== undefined && (isNaN(price) || price <= 0)) {
+      return reply.status(400).send({ error: 'Invalid price' })
+    }
+    if (name !== undefined && !name.trim()) {
+      return reply.status(400).send({ error: 'Product name cannot be empty' })
+    }
+    const updated = await updateShopProduct(productId, shopId, { price, name: name?.trim(), brand: brand?.trim(), unit: unit?.trim() })
+    broadcast({ type: 'product_updated', shopId, productId, price, name, brand, unit })
+    return reply.send({ message: 'Product updated', product: updated })
+  })
+
+  // POST /shops/:shopId/products/:productId/image  — upload image
+  server.post('/shops/:shopId/products/:productId/image', async (request, reply) => {
+    try { await request.jwtVerify() } catch { return reply.status(401).send({ error: 'Unauthorized' }) }
+    const { shopId, productId } = request.params as { shopId: string; productId: string }
+
+    const data = await request.file()
+    if (!data) return reply.status(400).send({ error: 'No file uploaded' })
+
+    const ext = path.extname(data.filename) || '.jpg'
+    const filename = `${productId}${ext}`
+    const filepath = path.join(UPLOADS_DIR, filename)
+
+    await pipeline(data.file, fs.createWriteStream(filepath))
+
+    const imageUrl = `/uploads/${filename}`
+    const updated = await updateShopProduct(productId, shopId, { custom_image_url: imageUrl })
+    broadcast({ type: 'product_updated', shopId, productId, custom_image_url: imageUrl })
+    return reply.send({ message: 'Image uploaded', image_url: imageUrl, product: updated })
+  })
+
+  // DELETE /shops/:shopId/products/:productId  — hide product from catalogue
+  server.delete('/shops/:shopId/products/:productId', async (request, reply) => {
+    try { await request.jwtVerify() } catch { return reply.status(401).send({ error: 'Unauthorized' }) }
+    const { shopId, productId } = request.params as { shopId: string; productId: string }
+    await removeShopProduct(productId, shopId)
+    return reply.send({ message: 'Product removed' })
   })
 }

@@ -8,6 +8,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { getMyOrders } from '../services/api';
 
+const WS_URL = Platform.OS === 'android'
+  ? 'ws://10.0.2.2:3000/ws'
+  : 'ws://localhost:3000/ws';
+
 const ACTIVE_STATUSES = ['pending','confirmed','assigned','picked_up','out_for_delivery','processing'];
 const PAST_STATUSES   = ['delivered','cancelled','rejected','failed'];
 
@@ -47,8 +51,8 @@ export default function OrdersScreen({ navigation }: any) {
   const [refreshing, setRefreshing]     = useState(false);
   const [tab, setTab]                   = useState<'active'|'past'>('active');
   const [cancelledAlert, setCancelledAlert] = useState<any | null>(null);
-  const slideAnim = useRef(new Animated.Value(-100)).current;
-  const pollRef      = useRef<ReturnType<typeof setInterval> | null>(null);
+  const slideAnim    = useRef(new Animated.Value(-100)).current;
+  const mountedRef   = useRef(true);
   const prevStatuses = useRef<Record<string, string>>({});
   const isFirstFetch = useRef(true);
 
@@ -80,10 +84,37 @@ export default function OrdersScreen({ navigation }: any) {
     }
   }, []);
 
+  // Initial fetch + real-time WebSocket (replaces 10s polling)
   useEffect(() => {
+    mountedRef.current = true;
     fetchOrders();
-    pollRef.current = setInterval(fetchOrders, 10000);
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+
+    let ws: WebSocket | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const connect = () => {
+      if (!mountedRef.current) return;
+      ws = new WebSocket(WS_URL);
+      ws.onmessage = (e) => {
+        try {
+          const event = JSON.parse(e.data);
+          if (event.type === 'order_created' || event.type === 'order_updated') {
+            fetchOrders();
+          }
+        } catch {}
+      };
+      ws.onclose = () => {
+        if (mountedRef.current) reconnectTimer = setTimeout(connect, 2000);
+      };
+      ws.onerror = () => ws?.close();
+    };
+
+    connect();
+    return () => {
+      mountedRef.current = false;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      ws?.close();
+    };
   }, [fetchOrders]);
 
   // Refetch immediately whenever the tab comes into focus
@@ -237,8 +268,8 @@ export default function OrdersScreen({ navigation }: any) {
         >
           {tab==='active' && active.length > 0 && (
             <View style={s.hintCard}>
-              <Ionicons name="sync-outline" size={14} color="#3B82F6" />
-              <Text style={s.hintTxt}>Updates every 10 seconds automatically</Text>
+              <View style={{ width:7, height:7, borderRadius:3.5, backgroundColor:'#22C55E' }} />
+              <Text style={s.hintTxt}>Live — order status updates in real time</Text>
             </View>
           )}
 
@@ -337,9 +368,9 @@ const s = StyleSheet.create({
   browseBtn:   { borderRadius:14, paddingHorizontal:32, paddingVertical:14 },
   browseTxt:   { color:'#fff', fontSize:15, fontWeight:'700' },
 
-  hintCard:    { flexDirection:'row', alignItems:'center', gap:8, backgroundColor:'#EFF6FF',
-                  borderRadius:12, padding:12, borderWidth:1, borderColor:'#BFDBFE' },
-  hintTxt:     { fontSize:12, color:'#1D4ED8', flex:1 },
+  hintCard:    { flexDirection:'row', alignItems:'center', gap:8, backgroundColor:'#F0FDF4',
+                  borderRadius:12, padding:12, borderWidth:1, borderColor:'#BBF7D0' },
+  hintTxt:     { fontSize:12, color:'#15803D', flex:1 },
 
   card:        { backgroundColor:'#fff', borderRadius:18, overflow:'hidden',
                   shadowColor:'#000', shadowOpacity:0.06, shadowRadius:10, shadowOffset:{width:0,height:3} },

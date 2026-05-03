@@ -1,12 +1,13 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity,
-  StyleSheet, Platform, Dimensions,
+  StyleSheet, Platform, Dimensions, Image,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useCart } from '../store/CartContext';
 import { getShopProducts } from '../services/api';
+import { useProductSocket } from '../hooks/useProductSocket';
 
 const { width: W } = Dimensions.get('window');
 
@@ -33,30 +34,35 @@ export default function ProductDetailScreen({ route, navigation }: any) {
   const { addItem, updateQty, items } = useCart();
   const [activeTab, setActiveTab] = useState<'details'|'nutrition'>('details');
   const [liveProduct, setLiveProduct] = useState<any>(passedProduct);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const shop    = passedShop || MOCK_SHOP;
   const product = liveProduct || passedProduct;
 
-  // ── Poll for live stock status every 10 seconds
-  useEffect(() => {
-    const fetchLive = async () => {
-      if (!shop?.id || !passedProduct?.id) return;
-      try {
-        const res = await getShopProducts(shop.id);
-        const found = (res.data?.products ?? []).find((p: any) => p.id === passedProduct.id);
-        if (found) setLiveProduct({ ...passedProduct, ...found, emoji: passedProduct.emoji });
-      } catch { /* silently keep showing stale data */ }
-    };
-    fetchLive(); // immediate fetch on mount
-    pollRef.current = setInterval(fetchLive, 10_000);
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  // ── Fetch live data from API (called on mount + on WS event)
+  const fetchLive = useCallback(async () => {
+    if (!shop?.id || !passedProduct?.id) return;
+    try {
+      const res = await getShopProducts(shop.id);
+      const found = (res.data?.products ?? []).find((p: any) => p.id === passedProduct.id);
+      if (found) setLiveProduct({ ...passedProduct, ...found, emoji: passedProduct.emoji });
+    } catch { /* keep stale data */ }
   }, [shop?.id, passedProduct?.id]);
+
+  useEffect(() => { fetchLive(); }, [fetchLive]); // fetch on mount
+
+  // ── WebSocket: re-fetch immediately when this product is updated
+  useProductSocket(useCallback((event) => {
+    if (event.productId === passedProduct?.id) fetchLive();
+  }, [passedProduct?.id, fetchLive]));
 
   const qty    = items.find(i => i.product_id === product?.id)?.quantity || 0;
   // API uses 'low' for low stock (not 'low_stock')
   const isOos  = product?.stock_status === 'out_of_stock';
   const isLow  = product?.stock_status === 'low' || product?.stock_status === 'low_stock';
+  // Prefer custom uploaded image → master image_url → fallback to emoji
+  const imageUri = product?.custom_image_url
+    ? `http://localhost:3000${product.custom_image_url}`
+    : product?.imageUri || product?.image_url || null;
 
   const handleAdd = () => {
     addItem(
@@ -92,10 +98,14 @@ export default function ProductDetailScreen({ route, navigation }: any) {
       <ScrollView showsVerticalScrollIndicator={false}>
 
         {/* Product image hero */}
-        <View style={s.heroWrap}>
-          <LinearGradient colors={['#FFF4E6','#FFE8CC']} style={s.heroImg}>
-            <Text style={s.heroEmoji}>{product.emoji || '📦'}</Text>
-          </LinearGradient>
+        <View style={[s.heroWrap, imageUri && { paddingVertical:0, overflow:'hidden' }]}>
+          {imageUri ? (
+            <Image source={{ uri: imageUri }} style={s.heroPhoto} resizeMode="cover" />
+          ) : (
+            <LinearGradient colors={['#FFF4E6','#FFE8CC']} style={s.heroImg}>
+              <Text style={s.heroEmoji}>{product.emoji || '📦'}</Text>
+            </LinearGradient>
+          )}
           {isOos && (
             <View style={[s.heroBadge, { backgroundColor:'#EF4444' }]}>
               <Text style={s.heroBadgeTxt}>OUT OF STOCK</Text>
@@ -331,6 +341,7 @@ const s = StyleSheet.create({
 
   heroWrap:       { backgroundColor:'#fff', alignItems:'center', paddingVertical:32, position:'relative' },
   heroImg:        { width:W*0.5, height:W*0.5, borderRadius:24, alignItems:'center', justifyContent:'center' },
+  heroPhoto:      { width:W, height:W*0.6, borderRadius:0 },
   heroEmoji:      { fontSize:W*0.22 },
   heroBadge:      { position:'absolute', top:20, right:20, backgroundColor:'#FF8A00',
                      borderRadius:8, paddingHorizontal:10, paddingVertical:4 },
