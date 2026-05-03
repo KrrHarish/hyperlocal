@@ -150,17 +150,117 @@ export async function getRiderActiveOrder(riderId: string) {
     .first()
 }
 
-// Get rider earnings
-export async function getRiderEarnings(riderId: string) {
-  const delivered = await db('orders')
-    .where({ rider_id: riderId, status: 'delivered' })
+// Get rider earnings — optionally filtered by date range
+export async function getRiderEarnings(riderId: string, from?: Date, to?: Date) {
+  let q = db('orders').where({ rider_id: riderId, status: 'delivered' })
+  if (from) q = q.where('delivered_at', '>=', from)
+  if (to)   q = q.where('delivered_at', '<=', to)
+
+  const summary = await q.clone()
     .count('id as total_deliveries')
     .sum('delivery_fee as total_earned')
     .first()
 
+  // Daily breakdown — group by date within the period
+  const daily: { date: string; earned: number; deliveries: number }[] = await q.clone()
+    .select(db.raw("DATE(delivered_at) as date"))
+    .count('id as deliveries')
+    .sum('delivery_fee as earned')
+    .groupByRaw("DATE(delivered_at)")
+    .orderBy('date', 'asc')
+
   return {
-    total_deliveries: delivered?.total_deliveries || 0,
-    total_earned: delivered?.total_earned || 0,
-    wallet_balance: (await db('riders').where({ id: riderId }).first())?.wallet_balance || 0,
+    total_deliveries: Number(summary?.total_deliveries || 0),
+    total_earned:     Number(summary?.total_earned     || 0),
+    wallet_balance:   Number((await db('riders').where({ id: riderId }).first())?.wallet_balance || 0),
+    daily: daily.map(d => ({
+      date:       d.date,
+      earned:     Number(d.earned),
+      deliveries: Number(d.deliveries),
+    })),
   }
+}
+
+// Offer an order to the nearest available rider
+export async function offerOrderToRider(
+  orderId: string,
+  shopId: string,
+  shopLat: number,
+  shopLng: number,
+  excludeRiderIds: string[] = []
+) {
+  const { broadcast } = await import('../../shared/realtime')
+
+  // Find active rider IDs (already on a delivery)
+  const busyRiderIds = await db('orders')
+    .whereIn('status', ['assigned', 'picked_up'])
+    .whereNotNull('rider_id')
+    .pluck('rider_id')
+
+  const skipIds = [...busyRiderIds, ...excludeRiderIds]
+
+  // Find nearest available rider not in skip list
+  const nearbyRiders = await findNearestRiders(shopLat, shopLng, 15)
+  const rider = nearbyRiders.find((r: any) => !skipIds.includes(r.id)) || null
+
+  if (!rider) {
+    // No riders available — notify shop
+    broadcast({ type: 'order_no_riders', orderId, shopId })
+    return null
+  }
+
+  // Store offer in Redis with 30s TTL
+  await redis.set(`order_offered:${orderId}`, JSON.stringify({ riderId: rider.id, excludeRiderIds }), 'EX', 30)
+
+  // Fetch order details to include in the offer
+  const order = await db('orders as o')
+    .leftJoin('shops as s', 's.id', 'o.shop_id')
+    .where({ 'o.id': orderId })
+    .select('o.*', 's.name as shop_name', 's.lat as shop_lat', 's.lng as shop_lng')
+    .first()
+
+  const items = await db('order_items').where({ order_id: orderId })
+
+  // Broadcast offer only to this specific rider
+  broadcast({
+    type: 'order_offered',
+    orderId,
+    riderId: rider.id,
+    shopId,
+    shopName: order?.shop_name,
+    total: order?.total_amount,
+    deliveryFee: order?.delivery_fee,
+    distanceKm: parseFloat((rider as any).distance_km?.toFixed(1) ?? '0'),
+    preview: items.slice(0, 3).map((i: any) => i.product_name).join(', ') + (items.length > 3 ? '…' : ''),
+    itemCount: items.length,
+  })
+
+  return rider
+}
+
+// Rider rejects an order offer — offer to next rider
+export async function rejectOrderOffer(orderId: string, riderId: string) {
+  const { broadcast } = await import('../../shared/realtime')
+
+  // Get current offer state from Redis
+  const raw = await redis.get(`order_offered:${orderId}`)
+  const offerState = raw ? JSON.parse(raw) : { riderId, excludeRiderIds: [] }
+
+  // Make sure this rider can't be offered again
+  const excludeIds: string[] = [...(offerState.excludeRiderIds || []), riderId]
+
+  // Clear current offer
+  await redis.del(`order_offered:${orderId}`)
+
+  // Fetch shop location to find next rider
+  const order = await db('orders as o')
+    .leftJoin('shops as s', 's.id', 'o.shop_id')
+    .where({ 'o.id': orderId })
+    .select('o.shop_id', 'o.status', 's.lat as shop_lat', 's.lng as shop_lng')
+    .first()
+
+  if (!order || order.status !== 'confirmed') return
+
+  // Try to offer to next rider
+  await offerOrderToRider(orderId, order.shop_id, parseFloat(order.shop_lat), parseFloat(order.shop_lng), excludeIds)
 }

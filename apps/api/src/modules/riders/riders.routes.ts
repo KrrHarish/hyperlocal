@@ -1,4 +1,5 @@
 import { FastifyInstance } from 'fastify'
+import { db } from '../../shared/db/knex'
 import {
   registerRider,
   getRiderByPhone,
@@ -120,11 +121,41 @@ export async function riderRoutes(server: FastifyInstance) {
     const { orderId } = request.params as { orderId: string }
 
     try {
+      // Verify this rider was offered this order
+      const { redis } = await import('../../shared/redis')
+      const raw = await redis.get(`order_offered:${orderId}`)
+      const offer = raw ? JSON.parse(raw) : null
+
+      if (offer && offer.riderId !== user.id) {
+        return reply.status(403).send({ error: 'This order was not offered to you' })
+      }
+
+      // Clear the offer lock
+      await redis.del(`order_offered:${orderId}`)
+
       const order = await assignRiderToOrder(orderId, user.id)
+      const { broadcast } = await import('../../shared/realtime')
+      broadcast({ type: 'order_assigned', orderId, riderId: user.id, shopId: order.shop_id })
+      broadcast({ type: 'order_updated', orderId, status: 'assigned', shopId: order.shop_id })
       return reply.send({ message: 'Order accepted', order })
     } catch (err: any) {
       return reply.status(400).send({ error: err.message })
     }
+  })
+
+  // POST /riders/orders/:orderId/reject — rider declines, offer to next rider
+  server.post('/riders/orders/:orderId/reject', async (request, reply) => {
+    try { await request.jwtVerify() } catch {
+      return reply.status(401).send({ error: 'Unauthorized' })
+    }
+
+    const user = request.user as { id: string }
+    const { orderId } = request.params as { orderId: string }
+
+    const { rejectOrderOffer } = await import('./riders.service')
+    await rejectOrderOffer(orderId, user.id)
+
+    return reply.send({ message: 'Order declined' })
   })
 
   // GET /riders/orders/active — rider's current active order
@@ -138,14 +169,124 @@ export async function riderRoutes(server: FastifyInstance) {
     return reply.send({ order: order || null })
   })
 
-  // GET /riders/earnings — rider's earnings summary
+  // GET /riders/earnings?period=today|week|month|year|all — rider's earnings summary
   server.get('/riders/earnings', async (request, reply) => {
     try { await request.jwtVerify() } catch {
       return reply.status(401).send({ error: 'Unauthorized' })
     }
 
     const user = request.user as { id: string }
-    const earnings = await getRiderEarnings(user.id)
+    const { period = 'all', from: fromStr, to: toStr } = request.query as {
+      period?: string; from?: string; to?: string
+    }
+
+    let fromDate: Date | undefined
+    let toDate:   Date | undefined
+
+    // Custom date range takes priority over period
+    if (fromStr) {
+      fromDate = new Date(fromStr)
+      fromDate.setHours(0, 0, 0, 0)
+    }
+    if (toStr) {
+      toDate = new Date(toStr)
+      toDate.setHours(23, 59, 59, 999)
+    }
+
+    // If no custom range, compute from period
+    if (!fromStr && period !== 'all') {
+      const now  = new Date()
+      fromDate   = new Date(now)
+      if (period === 'today') {
+        fromDate.setHours(0, 0, 0, 0)
+      } else if (period === 'week') {
+        fromDate.setDate(now.getDate() - now.getDay())
+        fromDate.setHours(0, 0, 0, 0)
+      } else if (period === 'month') {
+        fromDate.setDate(1); fromDate.setHours(0, 0, 0, 0)
+      } else if (period === 'year') {
+        fromDate.setMonth(0, 1); fromDate.setHours(0, 0, 0, 0)
+      }
+    }
+
+    const earnings = await getRiderEarnings(user.id, fromDate, toDate)
     return reply.send({ earnings })
+  })
+
+  // GET /riders/me — get current rider's profile
+  server.get('/riders/me', async (request, reply) => {
+    try { await request.jwtVerify() } catch {
+      return reply.status(401).send({ error: 'Unauthorized' })
+    }
+    const user = request.user as { id: string }
+    const rider = await db('riders').where({ id: user.id }).first()
+    if (!rider) return reply.status(404).send({ error: 'Rider not found' })
+    return reply.send({ rider })
+  })
+
+  // GET /riders/orders/history — rider's completed deliveries
+  server.get('/riders/orders/history', async (request, reply) => {
+    try { await request.jwtVerify() } catch {
+      return reply.status(401).send({ error: 'Unauthorized' })
+    }
+    const user = request.user as { id: string }
+    const orders = await db('orders as o')
+      .leftJoin('shops as s', 's.id', 'o.shop_id')
+      .where({ 'o.rider_id': user.id })
+      .whereIn('o.status', ['delivered', 'cancelled'])
+      .orderBy('o.updated_at', 'desc')
+      .limit(50)
+      .select('o.*', 's.name as shop_name')
+    return reply.send({ orders })
+  })
+
+  // PATCH /riders/orders/:orderId/pickup — rider confirms they have picked up the order
+  server.patch('/riders/orders/:orderId/pickup', async (request, reply) => {
+    try { await request.jwtVerify() } catch {
+      return reply.status(401).send({ error: 'Unauthorized' })
+    }
+    const user = request.user as { id: string }
+    const { orderId } = request.params as { orderId: string }
+
+    const order = await db('orders').where({ id: orderId, rider_id: user.id }).first()
+    if (!order) return reply.status(404).send({ error: 'Order not found' })
+    if (!['assigned', 'confirmed'].includes(order.status)) {
+      return reply.status(400).send({ error: 'Order cannot be marked as picked up' })
+    }
+
+    const [updated] = await db('orders')
+      .where({ id: orderId })
+      .update({ status: 'picked_up', picked_up_at: new Date() })
+      .returning('*')
+
+    const { broadcast } = await import('../../shared/realtime')
+    broadcast({ type: 'order_updated', orderId, status: 'picked_up', shopId: updated?.shop_id })
+    return reply.send({ order: updated })
+  })
+
+  // POST /riders/orders/:orderId/deliver — verify OTP and mark delivered
+  server.post('/riders/orders/:orderId/deliver', async (request, reply) => {
+    try { await request.jwtVerify() } catch {
+      return reply.status(401).send({ error: 'Unauthorized' })
+    }
+    const user = request.user as { id: string }
+    const { orderId } = request.params as { orderId: string }
+    const { otp } = request.body as { otp: string }
+
+    if (!otp) return reply.status(400).send({ error: 'OTP is required' })
+
+    const order = await db('orders').where({ id: orderId, rider_id: user.id }).first()
+    if (!order) return reply.status(404).send({ error: 'Order not found' })
+    if (order.status !== 'picked_up') return reply.status(400).send({ error: 'Order has not been picked up yet' })
+    if (order.delivery_otp !== otp) return reply.status(400).send({ error: 'Wrong OTP' })
+
+    const [updated] = await db('orders')
+      .where({ id: orderId })
+      .update({ status: 'delivered', otp_verified: true, delivered_at: new Date() })
+      .returning('*')
+
+    const { broadcast } = await import('../../shared/realtime')
+    broadcast({ type: 'order_updated', orderId, status: 'delivered', shopId: updated?.shop_id })
+    return reply.send({ order: updated })
   })
 }

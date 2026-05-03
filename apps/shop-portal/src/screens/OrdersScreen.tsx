@@ -51,10 +51,9 @@ const STATUS_LABEL: Record<string, string> = {
 }
 
 // Next action the shop owner can take for each status
+// Only shops can confirm pending orders — rider controls pickup/delivery from here
 const NEXT_ACTION: Partial<Record<OrderStatus, { label: string; next: string; color?: string }>> = {
-  pending:   { label: '✅ Confirm Order',        next: 'confirmed'  },
-  confirmed: { label: '🛵 Out for Delivery',      next: 'picked_up'  },
-  assigned:  { label: '📦 Rider Picked Up',       next: 'picked_up'  },
+  pending: { label: '✅ Confirm Order', next: 'confirmed' },
 }
 
 function fmt(n: string | number) {
@@ -257,7 +256,7 @@ function OrderCard({ order, onAction, onCancel }: {
                     {acting ? 'Updating…' : action.label}
                   </button>
                 )}
-                {(order.status === 'pending' || order.status === 'confirmed' || order.status === 'assigned') && (
+                {(order.status === 'pending' || order.status === 'confirmed') && (
                   <button className="btn-danger" onClick={() => setShowCancelModal(true)} disabled={acting}
                     style={{ padding:'10px 18px', fontSize:13 }}>
                     Cancel Order
@@ -293,8 +292,8 @@ export default function OrdersScreen() {
     try {
       const res = await api.get(`/shops/${shop.id}/orders`)
       const raw: Order[] = res.data.orders ?? []
-      // Enrich active/pending orders with items
-      const toEnrich = raw.filter(o => ['pending','confirmed','assigned','picked_up'].includes(o.status))
+      // Enrich all orders with items
+      const toEnrich = raw
       const enriched = await Promise.all(toEnrich.map(async o => {
         try {
           const r = await api.get(`/orders/${o.id}`)

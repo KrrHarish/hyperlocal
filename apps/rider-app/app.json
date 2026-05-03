@@ -1,0 +1,44 @@
+{
+  "expo": {
+    "name": "Zuqu Rider",
+    "slug": "zuqu-rider",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#0A0A0A"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.zuqu.rider",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Zuqu Rider needs your location to find nearby orders.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Zuqu Rider needs your location to assign you nearby orders.",
+        "NSLocationAlwaysUsageDescription": "Zuqu Rider needs your background location to track deliveries."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0A0A0A"
+      },
+      "package": "com.zuqu.rider",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION"
+      ]
+    },
+    "plugins": [
+      "expo-splash-screen",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Zuqu Rider needs your location to find nearby orders.",
+          "locationAlwaysAndWhenInUsePermission": "Zuqu Rider needs your location to assign you nearby orders."
+        }
+      ]
+    ]
+  }
+}

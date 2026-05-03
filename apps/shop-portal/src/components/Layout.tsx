@@ -111,11 +111,22 @@ export default function Layout() {
   const navigate = useNavigate()
   const [toggling, setToggling] = useState(false)
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
-  const [soundEnabled, setSoundEnabled]   = useState(false)
-  const [notifEnabled, setNotifEnabled]   = useState(() => Notification.permission === 'granted')
+  const [soundEnabled, setSoundEnabled]   = useState(true)
+  const [notifEnabled, setNotifEnabled]   = useState(() => Notification.permission === 'granted' || true)
   const pushSubRef      = useRef<PushSubscription | null>(null)
   const soundEnabledRef = useRef(soundEnabled)
   useEffect(() => { soundEnabledRef.current = soundEnabled }, [soundEnabled])
+
+  // Auto-resume AudioContext on first user interaction (browser autoplay policy)
+  useEffect(() => {
+    const resume = () => { try { getAudioCtx().resume() } catch {} }
+    window.addEventListener('click', resume, { once: true })
+    window.addEventListener('keydown', resume, { once: true })
+    return () => {
+      window.removeEventListener('click', resume)
+      window.removeEventListener('keydown', resume)
+    }
+  }, [])
 
   // Real-time new-order alerts via WebSocket — no polling
   useEffect(() => {

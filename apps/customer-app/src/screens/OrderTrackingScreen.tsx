@@ -380,6 +380,26 @@ export default function OrderTrackingScreen({ route, navigation }: any) {
           })}
         </View>
 
+        {/* ── Delivery OTP — show ONLY when rider has picked up ── */}
+        {order?.status === 'picked_up' && order?.delivery_otp && (
+          <LinearGradient colors={['#FF8A00', '#FF5C00']} style={s.otpCard} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+            <View style={s.otpTopRow}>
+              <View style={s.otpLockBadge}>
+                <Ionicons name="lock-closed" size={14} color="#FF8A00" />
+              </View>
+              <Text style={s.otpLabel}>DELIVERY OTP</Text>
+            </View>
+            <View style={s.otpDigits}>
+              {String(order.delivery_otp).split('').map((d: string, i: number) => (
+                <View key={i} style={s.otpDigitBox}>
+                  <Text style={s.otpDigitTxt}>{d}</Text>
+                </View>
+              ))}
+            </View>
+            <Text style={s.otpSub}>Show this to your delivery partner at the door</Text>
+          </LinearGradient>
+        )}
+
         {/* Rider card — show as soon as rider is assigned */}
         {step >= 1 && !isDelivered && order?.rider_name && (
           <View style={s.riderCard}>
@@ -538,9 +558,24 @@ const s = StyleSheet.create({
   rateTxt:         { fontSize:14, fontWeight:'700', color:'#FF8A00' },
   reorderBtn:      { height:52, flexDirection:'row', alignItems:'center', justifyContent:'center', gap:8 },
   reorderTxt:      { color:'#fff', fontSize:14, fontWeight:'700' },
-   cancelOrderBtn:  { flexDirection:'row', alignItems:'center', gap:6, alignSelf:'center',
+  cancelOrderBtn:  { flexDirection:'row', alignItems:'center', gap:6, alignSelf:'center',
                       marginTop:8, paddingHorizontal:18, paddingVertical:10,
                       borderRadius:99, borderWidth:1.5, borderColor:'#EF4444',
                       backgroundColor:'#FEF2F2' },
   cancelOrderTxt:  { fontSize:13, fontWeight:'700', color:'#EF4444' },
+
+  // OTP card — Swiggy-style
+  otpCard:         { borderRadius:14, paddingHorizontal:14, paddingVertical:10,
+                      shadowColor:'#FF8A00', shadowOpacity:0.25, shadowRadius:8, shadowOffset:{width:0,height:3} },
+  otpTopRow:       { flexDirection:'row', alignItems:'center', gap:6, marginBottom:8 },
+  otpLockBadge:    { width:18, height:18, borderRadius:9, backgroundColor:'#fff',
+                      alignItems:'center', justifyContent:'center' },
+  otpLabel:        { fontSize:10, fontWeight:'800', color:'#fff', letterSpacing:1.5 },
+  otpDigits:       { flexDirection:'row', gap:6, justifyContent:'center', marginBottom:8 },
+  otpDigitBox:     { width:42, height:46, borderRadius:8,
+                      backgroundColor:'rgba(255,255,255,0.22)',
+                      alignItems:'center', justifyContent:'center',
+                      borderWidth:1, borderColor:'rgba(255,255,255,0.4)' },
+  otpDigitTxt:     { fontSize:22, fontWeight:'900', color:'#fff' },
+  otpSub:          { fontSize:10, color:'rgba(255,255,255,0.8)', textAlign:'center' },
 });

@@ -171,32 +171,24 @@ export async function updateOrderStatus(orderId: string, status: string, extra =
     cancelled:  { cancelled_at: now },
   }
 
-  // Auto-assign an available rider when shop confirms the order
+  // Offer order to nearest available rider when shop confirms
   if (status === 'confirmed') {
-    const activeRiderIds = db('orders')
-      .whereIn('status', ['assigned', 'picked_up'])
-      .whereNotNull('rider_id')
-      .select('rider_id')
+    // Confirm the order first
+    const [confirmed] = await db('orders')
+      .where({ id: orderId })
+      .update({ status: 'confirmed', confirmed_at: now, ...extra })
+      .returning('*')
 
-    const rider = await db('riders')
-      .where({ is_online: true, is_verified: true, is_suspended: false })
-      .whereNotIn('id', activeRiderIds)
-      .first()
+    broadcast({ type: 'order_updated', orderId, status: 'confirmed', shopId: confirmed?.shop_id })
 
-    if (rider) {
-      const [updated] = await db('orders')
-        .where({ id: orderId })
-        .update({
-          status: 'assigned',
-          rider_id: rider.id,
-          confirmed_at: now,
-          assigned_at: now,
-          ...extra,
-        })
-        .returning('*')
-      broadcast({ type: 'order_updated', orderId, status: 'assigned', shopId: updated?.shop_id })
-      return updated
+    // Offer to nearest available rider (they must accept before it becomes 'assigned')
+    const shop = await db('shops').where({ id: confirmed?.shop_id }).first()
+    if (shop?.lat && shop?.lng) {
+      const { offerOrderToRider } = await import('../riders/riders.service')
+      await offerOrderToRider(orderId, confirmed.shop_id, parseFloat(shop.lat), parseFloat(shop.lng))
     }
+
+    return confirmed
   }
 
   const [updated] = await db('orders')

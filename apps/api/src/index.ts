@@ -50,6 +50,21 @@ server.get('/health', async () => {
   return { status: 'ok', timestamp: new Date().toISOString() }
 })
 
+// Internal: re-trigger order offer from within this process
+server.post('/api/internal/offer/:orderId', async (request, reply) => {
+  const { orderId } = request.params as { orderId: string }
+  const { db } = await import('./shared/db/knex')
+  const { offerOrderToRider } = await import('./modules/riders/riders.service')
+  const order = await db('orders as o')
+    .leftJoin('shops as s', 's.id', 'o.shop_id')
+    .where({ 'o.id': orderId })
+    .select('o.*', 's.lat as slat', 's.lng as slng')
+    .first()
+  if (!order) return reply.status(404).send({ error: 'Order not found' })
+  const rider = await offerOrderToRider(orderId, order.shop_id, parseFloat(order.slat), parseFloat(order.slng))
+  return reply.send({ offered: !!rider, rider: rider?.name ?? null })
+})
+
 const start = async () => {
   try {
     await server.listen({ port: Number(process.env.PORT) || 3000, host: '0.0.0.0' })
