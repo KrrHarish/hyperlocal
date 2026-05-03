@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View, Text, ScrollView, TouchableOpacity,
   StyleSheet, RefreshControl, ActivityIndicator,
@@ -178,15 +179,31 @@ export default function HomeScreen({ navigation }: any) {
 
   useEffect(() => { fetchShops(); }, [fetchShops]);
 
-  // ── Fetch products when a category is selected
-  useEffect(() => {
+  // ── Fetch products for selected category (silent refresh — no spinner on poll)
+  const fetchCatProducts = useCallback(async (showSpinner = false) => {
     if (category === 'all') { setCatProducts([]); return; }
-    setCatLoading(true);
-    getProductsByCategory(category)
-      .then(res => setCatProducts(res.data?.products || []))
-      .catch(() => setCatProducts([]))
-      .finally(() => setCatLoading(false));
+    if (showSpinner) setCatLoading(true);
+    try {
+      const res = await getProductsByCategory(category);
+      setCatProducts(res.data?.products || []);
+    } catch { /* keep stale data */ }
+    finally { if (showSpinner) setCatLoading(false); }
   }, [category]);
+
+  // Re-fetch when category changes (show spinner) or screen comes back into focus
+  useEffect(() => { fetchCatProducts(true); }, [category]);
+
+  // Poll every 10 s while screen is visible — updates stock tags without user doing anything
+  const catPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useFocusEffect(
+    useCallback(() => {
+      fetchCatProducts(false);                          // immediate silent refresh on focus
+      catPollRef.current = setInterval(() => fetchCatProducts(false), 10_000);
+      return () => {
+        if (catPollRef.current) clearInterval(catPollRef.current);
+      };
+    }, [fetchCatProducts])
+  );
 
   const getCartQty = (productId: string) =>
     items.find(i => i.product_id === productId)?.quantity || 0;
@@ -428,14 +445,16 @@ export default function HomeScreen({ navigation }: any) {
                   {catProducts.map((p: any) => {
                     const emoji = productEmoji(p.name, p.category);
                     const qty = getCartQty(p.id);
-                    const isOos = p.stock_status === 'out_of_stock';
+                    const isOos  = p.stock_status === 'out_of_stock';
+                    const isLow  = p.stock_status === 'low' || p.stock_status === 'low_stock';
                     const shopClosed = p.shop_is_open === false;
                     return (
                       <TouchableOpacity
                         key={p.id}
                         style={[s.productCard, (isOos || shopClosed) && { opacity: 0.55 }]}
                         activeOpacity={0.85}
-                        onPress={() => navigation.navigate('Shop', {
+                        onPress={() => navigation.navigate('ProductDetail', {
+                          product: { ...p, emoji },
                           shop: { id: p.shop_id, name: p.shop_name, address: p.shop_address,
                                   rating: p.shop_rating, is_open: p.shop_is_open,
                                   eta: '10–15 min', distance: 'Nearby', category: p.category }
@@ -446,6 +465,11 @@ export default function HomeScreen({ navigation }: any) {
                           {isOos && (
                             <View style={[s.productBadge, { backgroundColor:'#EF4444' }]}>
                               <Text style={s.productBadgeTxt}>OUT OF STOCK</Text>
+                            </View>
+                          )}
+                          {isLow && !isOos && !shopClosed && (
+                            <View style={[s.productBadge, { backgroundColor:'#F59E0B' }]}>
+                              <Text style={s.productBadgeTxt}>LOW STOCK</Text>
                             </View>
                           )}
                           {shopClosed && !isOos && (

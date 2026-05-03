@@ -36,6 +36,8 @@ cd apps/api
 
 ### Start (development)
 ```bash
+npm run dev
+# or directly:
 npx tsx src/index.ts
 ```
 

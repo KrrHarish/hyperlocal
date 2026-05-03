@@ -4,9 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "dev": "nodemon --watch src --ext ts --exec ts-node src/index.ts",
-    "migrate": "ts-node src/shared/db/migrate.ts",
-    "seed": "ts-node src/modules/products/seed.ts",
+    "dev": "nodemon --watch src --ext ts --exec 'npx tsx' src/index.ts",
+    "migrate": "npx tsx src/shared/db/migrate.ts",
+    "seed": "npx tsx src/modules/products/seed.ts",
     "build": "tsc",
     "start": "node dist/index.js"
   },

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity,
   StyleSheet, Platform, Dimensions,
@@ -6,6 +6,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useCart } from '../store/CartContext';
+import { getShopProducts } from '../services/api';
 
 const { width: W } = Dimensions.get('window');
 
@@ -28,12 +29,34 @@ const SIMILAR = [
 ];
 
 export default function ProductDetailScreen({ route, navigation }: any) {
-  const { product, shop: passedShop } = route.params || {};
+  const { product: passedProduct, shop: passedShop } = route.params || {};
   const { addItem, updateQty, items } = useCart();
   const [activeTab, setActiveTab] = useState<'details'|'nutrition'>('details');
+  const [liveProduct, setLiveProduct] = useState<any>(passedProduct);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const shop = passedShop || MOCK_SHOP;
-  const qty  = items.find(i => i.product_id === product?.id)?.quantity || 0;
+  const shop    = passedShop || MOCK_SHOP;
+  const product = liveProduct || passedProduct;
+
+  // ── Poll for live stock status every 10 seconds
+  useEffect(() => {
+    const fetchLive = async () => {
+      if (!shop?.id || !passedProduct?.id) return;
+      try {
+        const res = await getShopProducts(shop.id);
+        const found = (res.data?.products ?? []).find((p: any) => p.id === passedProduct.id);
+        if (found) setLiveProduct({ ...passedProduct, ...found, emoji: passedProduct.emoji });
+      } catch { /* silently keep showing stale data */ }
+    };
+    fetchLive(); // immediate fetch on mount
+    pollRef.current = setInterval(fetchLive, 10_000);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [shop?.id, passedProduct?.id]);
+
+  const qty    = items.find(i => i.product_id === product?.id)?.quantity || 0;
+  // API uses 'low' for low stock (not 'low_stock')
+  const isOos  = product?.stock_status === 'out_of_stock';
+  const isLow  = product?.stock_status === 'low' || product?.stock_status === 'low_stock';
 
   const handleAdd = () => {
     addItem(
@@ -73,11 +96,16 @@ export default function ProductDetailScreen({ route, navigation }: any) {
           <LinearGradient colors={['#FFF4E6','#FFE8CC']} style={s.heroImg}>
             <Text style={s.heroEmoji}>{product.emoji || '📦'}</Text>
           </LinearGradient>
-          {product.badge ? (
-            <View style={s.heroBadge}>
-              <Text style={s.heroBadgeTxt}>{product.badge}</Text>
+          {isOos && (
+            <View style={[s.heroBadge, { backgroundColor:'#EF4444' }]}>
+              <Text style={s.heroBadgeTxt}>OUT OF STOCK</Text>
             </View>
-          ) : null}
+          )}
+          {isLow && !isOos && (
+            <View style={[s.heroBadge, { backgroundColor:'#F59E0B' }]}>
+              <Text style={s.heroBadgeTxt}>LOW STOCK</Text>
+            </View>
+          )}
         </View>
 
         {/* Product info card */}
@@ -85,12 +113,12 @@ export default function ProductDetailScreen({ route, navigation }: any) {
           <View style={s.infoTop}>
             <View style={{ flex:1 }}>
               <Text style={s.productName}>{product.name}</Text>
-              <Text style={s.productUnit}>{product.unit || '1 piece'}</Text>
+              <Text style={s.productUnit}>{product.unit || product.brand || '1 piece'}</Text>
             </View>
-            <Text style={s.productPrice}>₹{product.price}</Text>
+            <Text style={s.productPrice}>₹{parseFloat(product.price).toFixed(0)}</Text>
           </View>
 
-          {/* Rating row */}
+          {/* Rating + stock row */}
           <View style={s.ratingRow}>
             <View style={s.ratingPill}>
               <Ionicons name="star" size={13} color="#F59E0B" />
@@ -98,12 +126,24 @@ export default function ProductDetailScreen({ route, navigation }: any) {
             </View>
             <Text style={s.ratingCount}>128 ratings</Text>
             <View style={s.dot} />
-            <Text style={s.inStockTxt}>{product.in_stock !== false ? '✅ In Stock' : '❌ Out of Stock'}</Text>
+            {isOos
+              ? <Text style={[s.inStockTxt, { color:'#EF4444' }]}>❌ Out of Stock</Text>
+              : isLow
+              ? <Text style={[s.inStockTxt, { color:'#F59E0B' }]}>⚠️ Low Stock</Text>
+              : <Text style={s.inStockTxt}>✅ In Stock</Text>
+            }
           </View>
 
           {/* Add to cart */}
           <View style={s.cartRow}>
-            {qty === 0 ? (
+            {isOos ? (
+              <View style={[s.addBtn, { opacity: 0.5 }]}>
+                <View style={[s.addBtnGrad, { backgroundColor:'#9CA3AF', borderRadius:16, justifyContent:'center', alignItems:'center', flexDirection:'row', gap:8 }]}>
+                  <Ionicons name="close-circle-outline" size={20} color="#fff" />
+                  <Text style={s.addBtnTxt}>Out of Stock</Text>
+                </View>
+              </View>
+            ) : qty === 0 ? (
               <TouchableOpacity style={s.addBtn} onPress={handleAdd} activeOpacity={0.85}>
                 <LinearGradient colors={['#FF8A00','#FF5C00']} style={s.addBtnGrad}
                   start={{ x:0,y:0 }} end={{ x:1,y:0 }}>

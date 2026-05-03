@@ -32,14 +32,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [shop, setShop] = useState<Shop | null>(null)
   const [loadingShop, setLoadingShop] = useState(false)
 
+  const logout = useCallback(() => {
+    localStorage.removeItem('zuqu_owner_token')
+    setToken(null)
+    setShop(null)
+  }, [])
+
   const refreshShop = useCallback(async () => {
     setLoadingShop(true)
     try {
       const res = await api.get('/shops/my')
       const shops: Shop[] = res.data.shops ?? []
       setShop(shops.length > 0 ? shops[0] : null)
-    } catch {
+    } catch (e: any) {
       setShop(null)
+      // Token expired or invalid — force back to login
+      if (e?.response?.status === 401) {
+        localStorage.removeItem('zuqu_owner_token')
+        setToken(null)
+      }
     } finally {
       setLoadingShop(false)
     }
@@ -52,12 +63,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = async (newToken: string) => {
     localStorage.setItem('zuqu_owner_token', newToken)
     setToken(newToken)
-  }
-
-  const logout = () => {
-    localStorage.removeItem('zuqu_owner_token')
-    setToken(null)
-    setShop(null)
   }
 
   return (

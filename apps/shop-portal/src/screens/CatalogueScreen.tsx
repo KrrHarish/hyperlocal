@@ -42,6 +42,7 @@ export default function CatalogueScreen() {
   const [products, setProducts] = useState<ShopProduct[]>([])
   const [loading, setLoading] = useState(true)
   const [updatingId, setUpdatingId] = useState<string | null>(null)
+  const [savedId, setSavedId] = useState<string | null>(null)
 
   // Add product modal state
   const [showAdd, setShowAdd] = useState(false)
@@ -79,6 +80,8 @@ export default function CatalogueScreen() {
       setProducts(prev =>
         prev.map(p => p.id === productId ? { ...p, stock_status: status } : p)
       )
+      setSavedId(productId)
+      setTimeout(() => setSavedId(null), 2000)
     } catch (e) {
       console.error(e)
     } finally {
@@ -191,26 +194,36 @@ export default function CatalogueScreen() {
                       <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--green-700)' }}>
                         ₹{parseFloat(p.price).toFixed(0)}
                       </span>
-                      <select
-                        value={p.stock_status}
-                        onChange={e => updateStock(p.id, e.target.value as StockStatus)}
-                        disabled={updatingId === p.id}
-                        style={{
-                          border: '1.5px solid var(--gray-200)',
-                          borderRadius: 6,
-                          padding: '4px 8px',
-                          fontSize: 12,
-                          fontWeight: 600,
-                          color: STOCK_COLOR[p.stock_status],
-                          cursor: 'pointer',
-                          background: 'white',
-                          outline: 'none',
-                        }}
-                      >
-                        {STOCK_OPTIONS.map(opt => (
-                          <option key={opt.value} value={opt.value}>{opt.label}</option>
-                        ))}
-                      </select>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        {savedId === p.id && (
+                          <span style={{ fontSize: 11, color: 'var(--green-600)', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                            ✓ Saved
+                          </span>
+                        )}
+                        {updatingId === p.id && (
+                          <div className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} />
+                        )}
+                        <select
+                          value={p.stock_status}
+                          onChange={e => updateStock(p.id, e.target.value as StockStatus)}
+                          disabled={updatingId === p.id}
+                          style={{
+                            border: '1.5px solid var(--gray-200)',
+                            borderRadius: 6,
+                            padding: '4px 8px',
+                            fontSize: 12,
+                            fontWeight: 600,
+                            color: STOCK_COLOR[p.stock_status],
+                            cursor: updatingId === p.id ? 'not-allowed' : 'pointer',
+                            background: 'white',
+                            outline: 'none',
+                          }}
+                        >
+                          {STOCK_OPTIONS.map(opt => (
+                            <option key={opt.value} value={opt.value}>{opt.label}</option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
                   </div>
                 </div>
