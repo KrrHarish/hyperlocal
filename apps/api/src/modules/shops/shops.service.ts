@@ -28,8 +28,11 @@ export async function getShopsByOwner(ownerId: string) {
 }
 
 export async function getNearbyShops(_lat: number, _lng: number, _radiusKm = 2) {
-  // Prototype: return only OPEN shops — no distance filter.
-  // The simulator uses the dev machine's real GPS (often a different city/country),
-  // so a distance filter would always return 0 results during development.
-  return db('shops').select('*').orderBy('name', 'asc')
+  // Returns only active (non-suspended) shops.
+  // Closed shops (is_open=false) are included so customers can see them as "Closed".
+  // Suspended shops (is_active=false) are excluded entirely.
+  return db('shops')
+    .where({ is_active: true })
+    .select('*')
+    .orderBy('name', 'asc')
 }

@@ -36,13 +36,13 @@ export async function toggleOnline(riderId: string, isOnline: boolean, lat?: num
     updateData.lng = lng
     updateData.location_updated = new Date()
 
-    // Store in Redis for fast geo queries
+    // Store in Redis for fast geo queries — 10 min TTL (refreshed on every location ping)
     await redis.set(
-  `rider_location:${riderId}`,
-  JSON.stringify({ lat, lng, updated: new Date() }),
-  'EX',
-  300
-)
+      `rider_location:${riderId}`,
+      JSON.stringify({ lat, lng, updated: new Date() }),
+      'EX',
+      600
+    )
   }
 
   if (!isOnline) {
@@ -54,6 +54,10 @@ export async function toggleOnline(riderId: string, isOnline: boolean, lat?: num
     .update(updateData)
     .returning('*')
 
+  // Notify all connected clients so CartScreens re-check availability immediately
+  const { broadcast } = await import('../../shared/realtime')
+  broadcast({ type: isOnline ? 'rider_online' : 'rider_offline', riderId })
+
   return updated
 }
 
@@ -63,13 +67,13 @@ export async function updateLocation(riderId: string, lat: number, lng: number) 
     .where({ id: riderId })
     .update({ lat, lng, location_updated: new Date() })
 
-  // Update Redis cache
- await redis.set(
-  `rider_location:${riderId}`,
-  JSON.stringify({ lat, lng, updated: new Date() }),
-  'EX',
-  300
-)
+  // Update Redis cache — 10 min TTL
+  await redis.set(
+    `rider_location:${riderId}`,
+    JSON.stringify({ lat, lng, updated: new Date() }),
+    'EX',
+    600
+  )
 }
 
 // Find nearest available riders to a shop (within radiusKm)
@@ -85,8 +89,35 @@ export async function findNearestRiders(
     .select('*')
     .orderBy('trust_score', 'desc')
 
-  // Calculate distance for each rider and filter by radius
-  const nearby = riders
+  if (riders.length === 0) return []
+
+  // Filter out "ghost-online" riders — those whose Redis location key has expired
+  // (rider app crashed or lost connection without explicitly going offline).
+  // The Redis key `rider_location:<id>` has a 10-min TTL, refreshed on every
+  // location ping. If it's gone, the rider is effectively unreachable.
+  const pipeline = redis.pipeline()
+  for (const rider of riders) {
+    pipeline.exists(`rider_location:${rider.id}`)
+  }
+  const results = await pipeline.exec()
+  const activeRiders = riders.filter((_: any, i: number) => {
+    const [err, exists] = results?.[i] ?? [null, 0]
+    return !err && exists === 1
+  })
+
+  // Auto-correct stale is_online flags in the background (fire-and-forget)
+  const staleIds = riders
+    .filter((_: any, i: number) => {
+      const [err, exists] = results?.[i] ?? [null, 0]
+      return !err && exists === 0
+    })
+    .map((r: any) => r.id)
+  if (staleIds.length > 0) {
+    db('riders').whereIn('id', staleIds).update({ is_online: false }).catch(() => {})
+  }
+
+  // Calculate distance for each active rider and filter by radius
+  const nearby = activeRiders
     .map((rider: any) => {
       const dist = haversineDistance(
         shopLat, shopLng,

@@ -2,7 +2,7 @@ import { FastifyInstance } from 'fastify'
 import { db } from './shared/db/knex'
 import { updateOrderStatus } from './modules/orders/orders.service'
 
-const CANCELLABLE_STATUSES = ['pending', 'placed', 'confirmed']
+const CANCELLABLE_STATUSES = ['pending', 'confirmed']
 
 export async function cancelOrder(server: FastifyInstance) {
   // POST /orders/:orderId/cancel — customer cancels their own order

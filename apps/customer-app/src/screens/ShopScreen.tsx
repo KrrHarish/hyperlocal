@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  ActivityIndicator, Platform, TextInput, StatusBar,
+  ActivityIndicator, Platform, TextInput, StatusBar, Image,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useCart } from '../store/CartContext';
-import { getShopProducts, getShopById } from '../services/api';
+import { getShopProducts, getShopById, IMAGE_BASE } from '../services/api';
 
 // ── Category emoji + colour map ─────────────────────────────────
 const CAT_META: Record<string, { emoji: string; color: string }> = {
@@ -64,8 +64,9 @@ function productBg(category: string): string {
 }
 
 export default function ShopScreen({ route, navigation }: any) {
-  const { shop: initialShop } = route.params;
-  const [shop, setShop]           = useState(initialShop);
+  // Accept either a full shop object OR just a shopId (e.g. from Reorder)
+  const { shop: initialShop, shopId: passedShopId } = route.params || {};
+  const [shop, setShop]           = useState<any>(initialShop || null);
   const { addItem, updateQty, items, itemCount, total } = useCart();
   const [products, setProducts]   = useState<any[]>([]);
   const [loading, setLoading]     = useState(true);
@@ -73,20 +74,38 @@ export default function ShopScreen({ route, navigation }: any) {
   const [activeTab, setActiveTab] = useState('All');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // If only shopId was passed (reorder flow), fetch the full shop first
+  useEffect(() => {
+    if (!initialShop && passedShopId) {
+      getShopById(passedShopId)
+        .then(res => {
+          const s = res.data?.shop || res.data;
+          if (s) setShop(s);
+          else setShop({ id: passedShopId, name: 'Shop', is_open: true, category: 'grocery' });
+        })
+        .catch(() => {
+          // Fallback minimal shop so we don't get stuck on loading forever
+          setShop({ id: passedShopId, name: 'Shop', is_open: true, category: 'grocery' });
+        });
+    }
+  }, [initialShop, passedShopId]);
+
   // Poll shop open/closed status every 15s
   useEffect(() => {
+    if (!shop?.id) return;
     const checkOpen = async () => {
       try {
-        const res = await getShopById(initialShop.id);
+        const res = await getShopById(shop.id);
         const fresh = res.data?.shop;
         if (fresh) setShop((prev: any) => ({ ...prev, is_open: fresh.is_open }));
       } catch {}
     };
     pollRef.current = setInterval(checkOpen, 15000);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [initialShop.id]);
+  }, [shop?.id]);
 
   useEffect(() => {
+    if (!shop?.id) return;
     (async () => {
       setLoading(true);
       try {
@@ -112,7 +131,7 @@ export default function ShopScreen({ route, navigation }: any) {
         setLoading(false);
       }
     })();
-  }, [shop.id]);
+  }, [shop?.id]);
 
   const getQty = (pid: string) => items.find(i => i.product_id === pid)?.quantity || 0;
 
@@ -130,6 +149,16 @@ export default function ShopScreen({ route, navigation }: any) {
     acc[k] = acc[k] ? [...acc[k], p] : [p];
     return acc;
   }, {});
+
+  // Shop data not loaded yet (reorder flow — only shopId passed)
+  if (!shop) {
+    return (
+      <View style={[s.root, s.center]}>
+        <ActivityIndicator size="large" color="#FF8A00" />
+        <Text style={s.loadTxt}>Loading shop…</Text>
+      </View>
+    );
+  }
 
   const shopClosed   = !shop.is_open;
   const deliveryFee  = total >= 200 ? 0 : 40;
@@ -177,15 +206,32 @@ export default function ShopScreen({ route, navigation }: any) {
       {/* ── SHOP INFO CARD ── */}
       <View style={s.shopCard}>
         {/* Shop banner / icon */}
-        <LinearGradient colors={['#FFF4E6', '#FFE0B2']} style={s.shopBanner}>
-          <Text style={s.shopBannerEmoji}>🏪</Text>
-          <View style={[s.openBadge, { backgroundColor: shop.is_open ? '#DCFCE7' : '#FEE2E2' }]}>
-            <View style={[s.openDot, { backgroundColor: shop.is_open ? '#22C55E' : '#EF4444' }]} />
-            <Text style={[s.openTxt, { color: shop.is_open ? '#15803D' : '#B91C1C' }]}>
-              {shop.is_open ? 'Open' : 'Closed'}
-            </Text>
-          </View>
-        </LinearGradient>
+        {(() => {
+          const imgUri = shop.image_url
+            ? (shop.image_url.startsWith('http') ? shop.image_url : `${IMAGE_BASE}${shop.image_url}`)
+            : null;
+          return imgUri ? (
+            <View style={s.shopBanner}>
+              <Image source={{ uri: imgUri }} style={{ width:'100%', height:'100%' }} resizeMode="cover" />
+              <View style={[s.openBadge, { backgroundColor: shop.is_open ? '#DCFCE7' : '#FEE2E2' }]}>
+                <View style={[s.openDot, { backgroundColor: shop.is_open ? '#22C55E' : '#EF4444' }]} />
+                <Text style={[s.openTxt, { color: shop.is_open ? '#15803D' : '#B91C1C' }]}>
+                  {shop.is_open ? 'Open' : 'Closed'}
+                </Text>
+              </View>
+            </View>
+          ) : (
+            <LinearGradient colors={['#FFF4E6', '#FFE0B2']} style={s.shopBanner}>
+              <Text style={s.shopBannerEmoji}>🏪</Text>
+              <View style={[s.openBadge, { backgroundColor: shop.is_open ? '#DCFCE7' : '#FEE2E2' }]}>
+                <View style={[s.openDot, { backgroundColor: shop.is_open ? '#22C55E' : '#EF4444' }]} />
+                <Text style={[s.openTxt, { color: shop.is_open ? '#15803D' : '#B91C1C' }]}>
+                  {shop.is_open ? 'Open' : 'Closed'}
+                </Text>
+              </View>
+            </LinearGradient>
+          );
+        })()}
 
         {/* Shop name & category */}
         <View style={s.shopInfo}>

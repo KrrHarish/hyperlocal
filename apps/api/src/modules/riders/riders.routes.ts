@@ -111,6 +111,48 @@ export async function riderRoutes(server: FastifyInstance) {
     return reply.send({ riders, count: riders.length })
   })
 
+  // GET /riders/available?shop_id=... — pre-order availability check (no auth needed)
+  server.get('/riders/available', async (request, reply) => {
+    const { shop_id, lat, lng, radius } = request.query as {
+      shop_id?: string
+      lat?: string
+      lng?: string
+      radius?: string
+    }
+
+    let shopLat: number
+    let shopLng: number
+
+    if (shop_id) {
+      const shop = await db('shops').where({ id: shop_id }).first()
+      if (!shop) return reply.status(404).send({ error: 'Shop not found' })
+      shopLat = parseFloat(shop.lat)
+      shopLng = parseFloat(shop.lng)
+    } else if (lat && lng) {
+      shopLat = parseFloat(lat)
+      shopLng = parseFloat(lng)
+    } else {
+      return reply.status(400).send({ error: 'shop_id or lat/lng required' })
+    }
+
+    const radiusKm = radius ? parseFloat(radius) : 10
+    const nearbyRiders = await findNearestRiders(shopLat, shopLng, radiusKm)
+
+    // Exclude riders already on an active delivery
+    const busyRiderIds = await db('orders')
+      .whereIn('status', ['assigned', 'picked_up'])
+      .whereNotNull('rider_id')
+      .pluck('rider_id')
+
+    const availableRiders = nearbyRiders.filter((r: any) => !busyRiderIds.includes(r.id))
+
+    return reply.send({
+      available: availableRiders.length > 0,
+      count: availableRiders.length,
+      total_nearby: nearbyRiders.length,
+    })
+  })
+
   // POST /riders/orders/:orderId/accept — rider accepts an order
   server.post('/riders/orders/:orderId/accept', async (request, reply) => {
     try { await request.jwtVerify() } catch {
@@ -121,6 +163,12 @@ export async function riderRoutes(server: FastifyInstance) {
     const { orderId } = request.params as { orderId: string }
 
     try {
+      // Re-validate rider is still online at acceptance time (race condition guard)
+      const currentRider = await db('riders').where({ id: user.id }).first()
+      if (!currentRider?.is_online) {
+        return reply.status(400).send({ error: 'You are offline. Go online to accept orders.' })
+      }
+
       // Verify this rider was offered this order
       const { redis } = await import('../../shared/redis')
       const raw = await redis.get(`order_offered:${orderId}`)

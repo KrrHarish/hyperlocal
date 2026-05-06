@@ -11,6 +11,33 @@ import { useProductSocket } from '../hooks/useProductSocket';
 
 const { width: W } = Dimensions.get('window');
 
+function getProductEmoji(name: string = '', category: string = ''): string {
+  const n = name.toLowerCase();
+  if (n.includes('milk'))    return '🥛'; if (n.includes('butter'))  return '🧈';
+  if (n.includes('curd') || n.includes('yogurt')) return '🥣';
+  if (n.includes('cheese'))  return '🧀'; if (n.includes('egg'))     return '🥚';
+  if (n.includes('bread'))   return '🍞'; if (n.includes('rice'))    return '🍚';
+  if (n.includes('atta') || n.includes('flour')) return '🌾';
+  if (n.includes('dal') || n.includes('lentil')) return '🫘';
+  if (n.includes('oil'))     return '🫒'; if (n.includes('salt'))    return '🧂';
+  if (n.includes('sugar'))   return '🍬'; if (n.includes('maggi') || n.includes('noodle')) return '🍜';
+  if (n.includes('biscuit') || n.includes('cookie')) return '🍪';
+  if (n.includes('chips') || n.includes('lays')) return '🍿';
+  if (n.includes('chocolate')) return '🍫';
+  if (n.includes('juice') || n.includes('tropicana')) return '🧃';
+  if (n.includes('cola') || n.includes('pepsi') || n.includes('sprite')) return '🥤';
+  if (n.includes('water'))   return '💧'; if (n.includes('coffee'))  return '☕';
+  if (n.includes('tea'))     return '🍵'; if (n.includes('soap') || n.includes('dettol')) return '🧼';
+  if (n.includes('shampoo')) return '🧴'; if (n.includes('toothpaste') || n.includes('colgate')) return '🪥';
+  if (n.includes('detergent') || n.includes('surf')) return '🧺';
+  if (n.includes('tablet') || n.includes('dolo')) return '💊';
+  const catMap: Record<string, string> = {
+    grocery:'🛒', dairy:'🥛', snacks:'🍿', beverages:'🧃',
+    personal_care:'🧴', household:'🧹', bakery:'🍞', pharmacy:'💊',
+  };
+  return catMap[category?.toLowerCase()] || '📦';
+}
+
 const MOCK_SHOP = {
   id: '341e69d3',
   name: 'Raju General Store',
@@ -56,17 +83,18 @@ export default function ProductDetailScreen({ route, navigation }: any) {
   }, [passedProduct?.id, fetchLive]));
 
   const qty    = items.find(i => i.product_id === product?.id)?.quantity || 0;
-  // API uses 'low' for low stock (not 'low_stock')
+  const emoji  = product?.emoji || getProductEmoji(product?.name, product?.category);
   const isOos  = product?.stock_status === 'out_of_stock';
   const isLow  = product?.stock_status === 'low' || product?.stock_status === 'low_stock';
-  // Prefer custom uploaded image → master image_url → fallback to emoji
+  // Only use custom_image_url (shop-uploaded). Ignore master image_url — it's often a placeholder box.
   const imageUri = product?.custom_image_url
     ? `http://localhost:3000${product.custom_image_url}`
-    : product?.imageUri || product?.image_url || null;
+    : null;
+  const price = parseFloat(product?.price) || 0;
 
   const handleAdd = () => {
     addItem(
-      { product_id: product.id, name: product.name, price: product.price, quantity: 1 },
+      { product_id: product.id, name: product.name, price: price, quantity: 1 },
       shop.id, shop.name
     );
   };
@@ -103,7 +131,7 @@ export default function ProductDetailScreen({ route, navigation }: any) {
             <Image source={{ uri: imageUri }} style={s.heroPhoto} resizeMode="cover" />
           ) : (
             <LinearGradient colors={['#FFF4E6','#FFE8CC']} style={s.heroImg}>
-              <Text style={s.heroEmoji}>{product.emoji || '📦'}</Text>
+              <Text style={s.heroEmoji}>{emoji}</Text>
             </LinearGradient>
           )}
           {isOos && (
@@ -125,7 +153,7 @@ export default function ProductDetailScreen({ route, navigation }: any) {
               <Text style={s.productName}>{product.name}</Text>
               <Text style={s.productUnit}>{product.unit || product.brand || '1 piece'}</Text>
             </View>
-            <Text style={s.productPrice}>₹{parseFloat(product.price).toFixed(0)}</Text>
+            <Text style={s.productPrice}>₹{price.toFixed(0)}</Text>
           </View>
 
           {/* Rating + stock row */}
@@ -172,7 +200,7 @@ export default function ProductDetailScreen({ route, navigation }: any) {
                     <Ionicons name="add" size={18} color="#fff" />
                   </TouchableOpacity>
                 </View>
-                <Text style={s.totalInCart}>₹{product.price * qty} in cart</Text>
+                <Text style={s.totalInCart}>₹{(price * qty).toFixed(0)} in cart</Text>
               </View>
             )}
           </View>
@@ -211,7 +239,7 @@ export default function ProductDetailScreen({ route, navigation }: any) {
               <View style={s.divider} />
               <View style={s.detailRow}>
                 <Text style={s.detailLbl}>MRP</Text>
-                <Text style={s.detailVal}>₹{product.price}</Text>
+                <Text style={s.detailVal}>{price > 0 ? `₹${price.toFixed(0)}` : '—'}</Text>
               </View>
             </>
           ) : (

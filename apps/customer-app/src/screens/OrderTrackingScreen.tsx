@@ -1,16 +1,21 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View, Text, StyleSheet, TouchableOpacity, Animated,
-  ScrollView, Platform, ActivityIndicator,
+  ScrollView, Platform, ActivityIndicator, Modal,
+  TextInput, KeyboardAvoidingView,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
+import { getOrderById, cancelOrder, getOrderRating, rateOrder, getRiderLocation } from '../services/api';
+import LiveMap from '../components/LiveMap';
+import CancelOrderModal from '../components/CancelOrderModal';
 
 const WS_URL = Platform.OS === 'android'
   ? 'ws://10.0.2.2:3000/ws'
   : 'ws://localhost:3000/ws';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
-import { getOrderById, cancelOrder } from '../services/api';
-import CancelOrderModal from '../components/CancelOrderModal';
+
+const MAP_HEIGHT = 220;
 
 const STEPS = [
   { key:'placed',    label:'Order Placed',    sub:'We received your order',       color:'#22C55E', icon:'checkmark-circle-outline' },
@@ -45,6 +50,21 @@ export default function OrderTrackingScreen({ route, navigation }: any) {
   const [order, setOrder]     = useState<any>(passedOrderData || null);
   const [loading, setLoading] = useState(!passedOrderData);
   const [showCancel, setShowCancel] = useState(false);
+  const [showRating, setShowRating] = useState(false);
+  const [riderRating, setRiderRating] = useState(0);
+  const [shopRating, setShopRating]   = useState(0);
+  const [reviewText, setReviewText]   = useState('');
+  const [ratingSubmitting, setRatingSubmitting] = useState(false);
+  const [ratingDone, setRatingDone]   = useState(false);
+  const [thanksDismissed, setThanksDismissed] = useState(false);
+
+  // Live map state
+  const [mapData, setMapData] = useState<{
+    rider: { lat: number; lng: number; name: string } | null;
+    shop:  { lat: number; lng: number; name: string } | null;
+    delivery: { lat: number; lng: number; address: string } | null;
+  } | null>(null);
+
   const pulseAnim  = useRef(new Animated.Value(1)).current;
   const mountedRef = useRef(true);
 
@@ -74,20 +94,25 @@ export default function OrderTrackingScreen({ route, navigation }: any) {
     mountedRef.current = true;
     const isAlreadyPast = passedStatus && PAST_STATUSES.includes(passedStatus);
     if (isAlreadyPast && passedOrderData) {
-      // Opened from history — no live connection needed
       setLoading(false);
       return () => { mountedRef.current = false; };
     }
 
-    // Active order — fetch immediately then keep live via WebSocket
+    // Fetch immediately on mount
     fetchOrder();
 
     let ws: WebSocket | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
 
     const connect = () => {
       if (!mountedRef.current) return;
       ws = new WebSocket(WS_URL);
+      ws.onopen = () => {
+        // Re-fetch latest status as soon as connection is (re)established
+        // in case we missed events while disconnected
+        fetchOrder();
+      };
       ws.onmessage = (e) => {
         try {
           const event = JSON.parse(e.data);
@@ -100,18 +125,79 @@ export default function OrderTrackingScreen({ route, navigation }: any) {
         } catch {}
       };
       ws.onclose = () => {
-        if (mountedRef.current) reconnectTimer = setTimeout(connect, 2000);
+        if (mountedRef.current) reconnectTimer = setTimeout(connect, 3000);
       };
       ws.onerror = () => ws?.close();
     };
 
     connect();
+
+    // Fallback poll every 10s — catches any missed WS events
+    pollTimer = setInterval(() => {
+      if (mountedRef.current) fetchOrder();
+    }, 10000);
+
     return () => {
       mountedRef.current = false;
       if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (pollTimer) clearInterval(pollTimer);
       ws?.close();
     };
   }, [fetchOrder, passedStatus, passedOrderData, orderId]);
+
+  // Re-fetch every time the screen comes back into focus
+  useFocusEffect(useCallback(() => {
+    const isAlreadyPast = passedStatus && PAST_STATUSES.includes(passedStatus);
+    if (!isAlreadyPast) fetchOrder();
+  }, [fetchOrder, passedStatus]));
+
+  // ── Live map: poll rider location every 5s while order is active ────────────
+  const fetchMapData = useCallback(async () => {
+    try {
+      const res = await getRiderLocation(orderId);
+      if (mountedRef.current) setMapData(res.data);
+    } catch {}
+  }, [orderId]);
+
+  useEffect(() => {
+    const ACTIVE = ['confirmed', 'assigned', 'picked_up'];
+    if (!ACTIVE.includes(currentStatus)) return;
+
+    fetchMapData();
+    const t = setInterval(fetchMapData, 5000);
+    return () => clearInterval(t);
+  }, [currentStatus, fetchMapData]);
+
+
+  // Check if order needs rating (delivered + not yet rated)
+  useEffect(() => {
+    if (!order || order.status !== 'delivered' || ratingDone || thanksDismissed) return;
+    getOrderRating(orderId).then(() => {
+      // Already rated — don't show modal
+    }).catch((err: any) => {
+      if (err?.response?.status === 404) {
+        setShowRating(true);
+      }
+    });
+  }, [order?.status, orderId, ratingDone, thanksDismissed]);
+
+  const handleSubmitRating = async () => {
+    if (riderRating === 0 || shopRating === 0) return;
+    setRatingSubmitting(true);
+    try {
+      await rateOrder(orderId, {
+        rider_rating: riderRating,
+        shop_rating: shopRating,
+        review: reviewText.trim() || undefined,
+      });
+      setRatingDone(true);
+      setShowRating(false);
+    } catch {
+      // silently fail — user can try again by tapping Rate Order
+    } finally {
+      setRatingSubmitting(false);
+    }
+  };
 
   // Stop pulse when order becomes past (cancelled/delivered)
   useEffect(() => {
@@ -228,9 +314,12 @@ export default function OrderTrackingScreen({ route, navigation }: any) {
           {/* Actions */}
           {!isCancelled && (
             <View style={s.actionsRow}>
-              <TouchableOpacity style={s.rateBtn}>
-                <Ionicons name="star-outline" size={17} color="#FF8A00" />
-                <Text style={s.rateTxt}>Rate Order</Text>
+              <TouchableOpacity
+                style={s.rateBtn}
+                onPress={() => !ratingDone && setShowRating(true)}
+              >
+                <Ionicons name={ratingDone ? 'star' : 'star-outline'} size={17} color="#FF8A00" />
+                <Text style={s.rateTxt}>{ratingDone ? 'Rated!' : 'Rate Order'}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={{ flex:1, borderRadius:16, overflow:'hidden' }}
                 onPress={() => navigation.goBack()}>
@@ -299,6 +388,17 @@ export default function OrderTrackingScreen({ route, navigation }: any) {
               </View>
             </Animated.View>
           </LinearGradient>
+        )}
+
+        {/* ── Live Map ── shown from confirmed onward — iOS & Android, no API key */}
+        {mapData && (mapData.rider || mapData.shop || mapData.delivery) && (
+          <LiveMap
+            height={MAP_HEIGHT}
+            rider={mapData.rider    ? { lat: mapData.rider.lat,    lng: mapData.rider.lng,    label: mapData.rider.name }    : null}
+            shop={mapData.shop      ? { lat: mapData.shop.lat,     lng: mapData.shop.lng,     label: mapData.shop.name }     : null}
+            delivery={mapData.delivery ? { lat: mapData.delivery.lat, lng: mapData.delivery.lng, label: mapData.delivery.address } : null}
+            step={step}
+          />
         )}
 
         {/* Waiting notices */}
@@ -442,9 +542,12 @@ export default function OrderTrackingScreen({ route, navigation }: any) {
         {/* Delivered actions */}
         {isDelivered && (
           <View style={s.actionsRow}>
-            <TouchableOpacity style={s.rateBtn}>
-              <Ionicons name="star-outline" size={17} color="#FF8A00" />
-              <Text style={s.rateTxt}>Rate Order</Text>
+            <TouchableOpacity
+              style={s.rateBtn}
+              onPress={() => !ratingDone && setShowRating(true)}
+            >
+              <Ionicons name={ratingDone ? 'star' : 'star-outline'} size={17} color="#FF8A00" />
+              <Text style={s.rateTxt}>{ratingDone ? 'Rated!' : 'Rate Order'}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={{ flex:1, borderRadius:16, overflow:'hidden' }}
               onPress={() => navigation.goBack()}>
@@ -473,6 +576,101 @@ export default function OrderTrackingScreen({ route, navigation }: any) {
           navigation.goBack();
         }}
       />
+
+      {/* Rating Modal */}
+      <Modal
+        visible={showRating}
+        transparent
+        animationType="fade"
+        onRequestClose={() => { setShowRating(false); setThanksDismissed(true); }}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={s.modalOverlay}
+        >
+          <View style={s.ratingModal}>
+            {/* Handle */}
+            <View style={s.modalHandle} />
+
+            <Text style={s.ratingTitle}>How was your experience?</Text>
+            <Text style={s.ratingSubtitle}>Your feedback helps us improve</Text>
+
+            {/* Rider rating */}
+            <View style={s.ratingSection}>
+              <View style={s.ratingSectionHeader}>
+                <Text style={{ fontSize: 20 }}>🛵</Text>
+                <Text style={s.ratingSectionLabel}>Delivery Partner</Text>
+              </View>
+              <View style={s.starsRow}>
+                {[1,2,3,4,5].map(n => (
+                  <TouchableOpacity key={n} onPress={() => setRiderRating(n)} hitSlop={{ top:8,bottom:8,left:8,right:8 }}>
+                    <Text style={[s.star, n <= riderRating && s.starFilled]}>★</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            <View style={s.ratingDivider} />
+
+            {/* Shop rating */}
+            <View style={s.ratingSection}>
+              <View style={s.ratingSectionHeader}>
+                <Text style={{ fontSize: 20 }}>🏪</Text>
+                <Text style={s.ratingSectionLabel}>Shop & Food Quality</Text>
+              </View>
+              <View style={s.starsRow}>
+                {[1,2,3,4,5].map(n => (
+                  <TouchableOpacity key={n} onPress={() => setShopRating(n)} hitSlop={{ top:8,bottom:8,left:8,right:8 }}>
+                    <Text style={[s.star, n <= shopRating && s.starFilled]}>★</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            {/* Review input */}
+            <TextInput
+              style={s.reviewInput}
+              placeholder="Add a review (optional)…"
+              placeholderTextColor="#666"
+              multiline
+              maxLength={300}
+              value={reviewText}
+              onChangeText={setReviewText}
+            />
+
+            {/* Submit */}
+            <TouchableOpacity
+              style={[s.submitRatingBtn, (riderRating === 0 || shopRating === 0) && { opacity: 0.4 }]}
+              disabled={riderRating === 0 || shopRating === 0 || ratingSubmitting}
+              onPress={handleSubmitRating}
+            >
+              {ratingSubmitting
+                ? <ActivityIndicator color="#fff" />
+                : <Text style={s.submitRatingTxt}>Submit Rating</Text>
+              }
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={s.skipRatingBtn}
+              onPress={() => { setShowRating(false); setThanksDismissed(true); }}
+            >
+              <Text style={s.skipRatingTxt}>Skip for now</Text>
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Thanks toast */}
+      {ratingDone && !thanksDismissed && (
+        <TouchableOpacity
+          style={s.thanksToast}
+          onPress={() => setThanksDismissed(true)}
+          activeOpacity={0.9}
+        >
+          <Ionicons name="checkmark-circle" size={20} color="#fff" />
+          <Text style={s.thanksTxt}>Thanks for rating!</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -563,6 +761,35 @@ const s = StyleSheet.create({
                       borderRadius:99, borderWidth:1.5, borderColor:'#EF4444',
                       backgroundColor:'#FEF2F2' },
   cancelOrderTxt:  { fontSize:13, fontWeight:'700', color:'#EF4444' },
+
+  // Rating modal
+  modalOverlay:    { flex:1, backgroundColor:'rgba(0,0,0,0.7)', justifyContent:'flex-end' },
+  ratingModal:     { backgroundColor:'#0D1B2A', borderTopLeftRadius:24, borderTopRightRadius:24,
+                      padding:24, paddingBottom:Platform.OS==='ios'?40:28 },
+  modalHandle:     { width:40, height:4, borderRadius:2, backgroundColor:'rgba(255,255,255,0.2)',
+                      alignSelf:'center', marginBottom:20 },
+  ratingTitle:     { fontSize:20, fontWeight:'800', color:'#fff', textAlign:'center', marginBottom:4 },
+  ratingSubtitle:  { fontSize:13, color:'rgba(255,255,255,0.5)', textAlign:'center', marginBottom:24 },
+  ratingSection:   { marginBottom:16 },
+  ratingSectionHeader: { flexDirection:'row', alignItems:'center', gap:8, marginBottom:12 },
+  ratingSectionLabel:  { fontSize:15, fontWeight:'700', color:'#fff' },
+  starsRow:        { flexDirection:'row', gap:8 },
+  star:            { fontSize:36, color:'rgba(255,255,255,0.2)' },
+  starFilled:      { color:'#FF8A00' },
+  ratingDivider:   { height:0.5, backgroundColor:'rgba(255,255,255,0.1)', marginBottom:16 },
+  reviewInput:     { backgroundColor:'rgba(255,255,255,0.08)', borderRadius:14, padding:14,
+                      color:'#fff', fontSize:14, minHeight:80, textAlignVertical:'top',
+                      borderWidth:1, borderColor:'rgba(255,255,255,0.12)', marginBottom:18 },
+  submitRatingBtn: { backgroundColor:'#FF8A00', borderRadius:16, height:52,
+                      alignItems:'center', justifyContent:'center', marginBottom:10 },
+  submitRatingTxt: { color:'#fff', fontSize:16, fontWeight:'800' },
+  skipRatingBtn:   { alignItems:'center', paddingVertical:8 },
+  skipRatingTxt:   { color:'rgba(255,255,255,0.4)', fontSize:13 },
+  thanksToast:     { position:'absolute', bottom:100, alignSelf:'center',
+                      backgroundColor:'#22C55E', borderRadius:99, paddingHorizontal:20, paddingVertical:12,
+                      flexDirection:'row', alignItems:'center', gap:8,
+                      shadowColor:'#000', shadowOpacity:0.2, shadowRadius:12, shadowOffset:{width:0,height:4} },
+  thanksTxt:       { color:'#fff', fontSize:14, fontWeight:'700' },
 
   // OTP card — Swiggy-style
   otpCard:         { borderRadius:14, paddingHorizontal:14, paddingVertical:10,

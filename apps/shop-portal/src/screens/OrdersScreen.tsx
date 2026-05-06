@@ -325,6 +325,7 @@ export default function OrdersScreen() {
           if ((event.type === 'order_created' || event.type === 'order_updated') && event.shopId === shop.id) {
             fetchOrders()
           }
+
         } catch {}
       }
       ws.onclose = () => { if (!destroyed) reconnectTimer = setTimeout(connect, 2000) }

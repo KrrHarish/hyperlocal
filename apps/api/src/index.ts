@@ -11,6 +11,10 @@ import { productRoutes } from './modules/products/products.routes'
 import { orderRoutes } from './modules/orders/orders.routes'
 import { riderRoutes } from './modules/riders/riders.routes'
 import { cancelOrder } from './cancel'
+import { adminRoutes } from './modules/admin/admin.routes'
+import { ratingsRoutes } from './modules/ratings/ratings.routes'
+import { addressRoutes } from './modules/addresses/addresses.routes'
+import { promosRoutes } from './modules/promos/promos.routes'
 
 dotenv.config()
 
@@ -42,8 +46,12 @@ server.register(authRoutes,    { prefix: '/api' })
 server.register(shopRoutes,    { prefix: '/api' })
 server.register(productRoutes, { prefix: '/api' })
 server.register(orderRoutes,   { prefix: '/api' })
-server.register(riderRoutes,   { prefix: '/api' })
-server.register(cancelOrder,   { prefix: '/api' })
+server.register(riderRoutes,    { prefix: '/api' })
+server.register(cancelOrder,    { prefix: '/api' })
+server.register(adminRoutes,    { prefix: '/api' })
+server.register(ratingsRoutes,  { prefix: '/api' })
+server.register(addressRoutes,  { prefix: '/api' })
+server.register(promosRoutes,   { prefix: '/api' })
 
 // Health check
 server.get('/health', async () => {

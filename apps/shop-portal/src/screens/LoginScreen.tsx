@@ -3,66 +3,31 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { useAuth } from '../store/AuthContext'
 
-type Step = 'phone' | 'otp'
-
 export default function LoginScreen() {
-  const [step, setStep] = useState<Step>('phone')
-  const [phone, setPhone] = useState('')
-  const [otp, setOtp] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const [devOtp, setDevOtp] = useState('')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [showPw,   setShowPw]   = useState(false)
+  const [loading,  setLoading]  = useState(false)
+  const [error,    setError]    = useState('')
 
   const { login } = useAuth()
-  const navigate = useNavigate()
+  const navigate  = useNavigate()
 
-  const sendOTP = async () => {
-    const cleaned = phone.replace(/\D/g, '').replace(/^91/, '')
-    if (cleaned.length !== 10) {
-      setError('Enter a valid 10-digit mobile number')
-      return
-    }
+  const handleLogin = async () => {
+    if (!username.trim()) { setError('Enter your username'); return }
+    if (!password)        { setError('Enter your password'); return }
+
     setError('')
     setLoading(true)
     try {
-      const res = await api.post('/auth/otp/send', { phone: `+91${cleaned}` })
-      if (res.data.otp) setDevOtp(res.data.otp)
-      setStep('otp')
-    } catch (e: any) {
-      setError(e?.response?.data?.error ?? 'Failed to send OTP')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const verifyOTP = async () => {
-    if (otp.length < 4) {
-      setError('Enter the OTP you received')
-      return
-    }
-    setError('')
-    setLoading(true)
-    try {
-      const cleaned = `+91${phone.replace(/\D/g, '').replace(/^91/, '')}`
-      const res = await api.post('/auth/otp/verify', { phone: cleaned, otp })
-      const token: string = res.data.token
-
-      await login(token)
-
-      // Check if this user owns a shop
-      const shopsRes = await api.get('/shops/my', {
-        headers: { Authorization: `Bearer ${token}` },
+      const res = await api.post('/auth/shop/login', {
+        username: username.trim().toLowerCase(),
+        password,
       })
-      const shops = shopsRes.data.shops ?? []
-      if (shops.length === 0) {
-        setError('No shop found for this account. Contact support to register your shop.')
-        setLoading(false)
-        return
-      }
-
+      await login(res.data.token)
       navigate('/dashboard', { replace: true })
     } catch (e: any) {
-      setError(e?.response?.data?.error ?? 'Invalid OTP')
+      setError(e?.response?.data?.error ?? 'Login failed. Check your credentials.')
     } finally {
       setLoading(false)
     }
@@ -74,7 +39,7 @@ export default function LoginScreen() {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      background: 'linear-gradient(135deg, var(--green-900) 0%, var(--green-700) 100%)',
+      background: 'linear-gradient(135deg, #064e3b 0%, #065f46 100%)',
     }}>
       <div style={{
         background: 'white',
@@ -82,123 +47,103 @@ export default function LoginScreen() {
         padding: '40px 36px',
         width: '100%',
         maxWidth: 400,
-        boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
+        boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
       }}>
         {/* Brand */}
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <div style={{ fontSize: 36, fontWeight: 800, color: 'var(--green-700)', letterSpacing: '-1px' }}>
+          <div style={{ fontSize: 36, fontWeight: 800, color: '#065f46', letterSpacing: '-1px' }}>
             Zuqu
           </div>
-          <div style={{ fontSize: 13, color: 'var(--gray-400)', marginTop: 4, fontWeight: 500 }}>
+          <div style={{ fontSize: 13, color: '#9ca3af', marginTop: 4, fontWeight: 500 }}>
             Shop Owner Portal
           </div>
         </div>
 
-        {step === 'phone' ? (
-          <>
-            <div style={{ marginBottom: 20 }}>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--gray-600)', marginBottom: 8 }}>
-                Mobile Number
-              </label>
-              <div style={{ display: 'flex', gap: 0 }}>
-                <span style={{
-                  padding: '10px 14px',
-                  background: 'var(--gray-100)',
-                  border: '1.5px solid var(--gray-200)',
-                  borderRight: 'none',
-                  borderRadius: '8px 0 0 8px',
-                  fontSize: 14,
-                  color: 'var(--gray-500)',
-                  fontWeight: 500,
-                }}>+91</span>
-                <input
-                  type="tel"
-                  placeholder="98765 43210"
-                  value={phone}
-                  onChange={e => setPhone(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && sendOTP()}
-                  maxLength={12}
-                  style={{
-                    flex: 1,
-                    padding: '10px 14px',
-                    border: '1.5px solid var(--gray-200)',
-                    borderRadius: '0 8px 8px 0',
-                    fontSize: 16,
-                    outline: 'none',
-                    letterSpacing: '0.5px',
-                  }}
-                />
-              </div>
-            </div>
+        {/* Username */}
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
+            Username
+          </label>
+          <input
+            type="text"
+            placeholder="your-shop-username"
+            value={username}
+            onChange={e => setUsername(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleLogin()}
+            autoCapitalize="none"
+            autoComplete="username"
+            style={inputStyle}
+          />
+        </div>
 
-            {error && (
-              <div style={{ color: 'var(--red)', fontSize: 13, marginBottom: 14, padding: '10px 12px', background: 'var(--red-light)', borderRadius: 8 }}>
-                {error}
-              </div>
-            )}
-
+        {/* Password */}
+        <div style={{ marginBottom: 20 }}>
+          <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
+            Password
+          </label>
+          <div style={{ position: 'relative' }}>
+            <input
+              type={showPw ? 'text' : 'password'}
+              placeholder="••••••••"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleLogin()}
+              autoComplete="current-password"
+              style={{ ...inputStyle, paddingRight: 44 }}
+            />
             <button
-              className="btn-primary"
-              onClick={sendOTP}
-              disabled={loading}
-              style={{ width: '100%', padding: '12px', fontSize: 15 }}
+              type="button"
+              onClick={() => setShowPw(v => !v)}
+              style={{
+                position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: '#9ca3af', fontSize: 16, padding: 0,
+              }}
             >
-              {loading ? 'Sending…' : 'Send OTP →'}
+              {showPw ? '🙈' : '👁️'}
             </button>
-          </>
-        ) : (
-          <>
-            <div style={{ marginBottom: 8 }}>
-              <button
-                onClick={() => { setStep('phone'); setOtp(''); setError(''); setDevOtp('') }}
-                style={{ background: 'none', color: 'var(--green-600)', fontSize: 13, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 4, marginBottom: 16 }}
-              >
-                ← +91 {phone}
-              </button>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--gray-600)', marginBottom: 8 }}>
-                Enter OTP
-              </label>
-              <input
-                type="number"
-                placeholder="· · · · · ·"
-                value={otp}
-                onChange={e => setOtp(e.target.value.slice(0, 6))}
-                onKeyDown={e => e.key === 'Enter' && verifyOTP()}
-                style={{
-                  width: '100%',
-                  padding: '12px 16px',
-                  border: '1.5px solid var(--gray-200)',
-                  borderRadius: 8,
-                  fontSize: 22,
-                  letterSpacing: 8,
-                  outline: 'none',
-                  textAlign: 'center',
-                }}
-              />
-              {devOtp && (
-                <div style={{ marginTop: 8, fontSize: 12, color: 'var(--gray-400)', textAlign: 'center' }}>
-                  Dev OTP: <strong style={{ color: 'var(--green-700)' }}>{devOtp}</strong>
-                </div>
-              )}
-            </div>
+          </div>
+        </div>
 
-            {error && (
-              <div style={{ color: 'var(--red)', fontSize: 13, marginBottom: 14, padding: '10px 12px', background: 'var(--red-light)', borderRadius: 8 }}>
-                {error}
-              </div>
-            )}
-
-            <button
-              className="btn-primary"
-              onClick={verifyOTP}
-              disabled={loading}
-              style={{ width: '100%', padding: '12px', fontSize: 15, marginTop: 8 }}
-            >
-              {loading ? 'Verifying…' : 'Verify & Login →'}
-            </button>
-          </>
+        {error && (
+          <div style={{
+            color: '#b91c1c', fontSize: 13, marginBottom: 16,
+            padding: '10px 12px', background: '#fef2f2',
+            borderRadius: 8, border: '1px solid #fecaca',
+          }}>
+            {error}
+          </div>
         )}
+
+        <button
+          onClick={handleLogin}
+          disabled={loading}
+          style={{
+            width: '100%', padding: '12px', fontSize: 15, fontWeight: 700,
+            background: loading ? '#6ee7b7' : '#065f46',
+            color: '#fff', border: 'none', borderRadius: 10,
+            cursor: loading ? 'not-allowed' : 'pointer',
+            transition: 'background 0.2s',
+          }}
+        >
+          {loading ? 'Signing in…' : 'Sign In →'}
+        </button>
+
+        <p style={{ textAlign: 'center', fontSize: 12, color: '#9ca3af', marginTop: 20 }}>
+          Credentials are provided by your administrator
+        </p>
       </div>
     </div>
   )
+}
+
+const inputStyle: React.CSSProperties = {
+  width: '100%',
+  padding: '10px 14px',
+  border: '1.5px solid #e5e7eb',
+  borderRadius: 8,
+  fontSize: 14,
+  outline: 'none',
+  boxSizing: 'border-box',
+  transition: 'border-color 0.15s',
 }

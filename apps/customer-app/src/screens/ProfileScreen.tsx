@@ -96,7 +96,10 @@ export default function ProfileScreen({ navigation }: any) {
             <View style={s.menuCard}>
               {section.items.map((item, idx) => (
                 <TouchableOpacity key={item.label} style={[s.menuItem,
-                  idx < section.items.length - 1 && s.menuItemBorder]} activeOpacity={0.7}>
+                  idx < section.items.length - 1 && s.menuItemBorder]} activeOpacity={0.7}
+                  onPress={() => {
+                    if (item.label === 'Saved Addresses') navigation.navigate('Addresses');
+                  }}>
                   <View style={[s.menuIcon, { backgroundColor: item.color + '18' }]}>
                     <Ionicons name={item.icon as any} size={20} color={item.color} />
                   </View>

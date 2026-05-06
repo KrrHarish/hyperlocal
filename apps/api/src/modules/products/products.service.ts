@@ -1,14 +1,31 @@
 import { db } from '../../shared/db/knex'
 
 export async function searchMasterCatalog(query: string) {
-  return db('master_products')
-    .where('is_approved', true)
+  // Join with shop_products + shops so results include price, shop_id, shop_name
+  return db('shop_products as sp')
+    .join('master_products as mp', 'mp.id', 'sp.master_product_id')
+    .join('shops as s', 's.id', 'sp.shop_id')
+    .where('mp.is_approved', true)
+    .where('sp.is_visible', true)
+    .where('s.is_active', true)
     .where(function () {
-      this.where('name', 'ilike', `%${query}%`)
-        .orWhere('brand', 'ilike', `%${query}%`)
+      this.where('mp.name', 'ilike', `%${query}%`)
+        .orWhere('mp.brand', 'ilike', `%${query}%`)
     })
-    .select('*')
-    .limit(20)
+    .select(
+      'sp.id',
+      'sp.price',
+      'sp.stock_status',
+      'sp.custom_image_url',
+      'sp.shop_id',
+      'mp.name',
+      'mp.brand',
+      'mp.unit',
+      'mp.category',
+      'mp.image_url',
+      's.name as shop_name',
+    )
+    .limit(30)
 }
 
 export async function addProductToShop(shopId: string, data: {

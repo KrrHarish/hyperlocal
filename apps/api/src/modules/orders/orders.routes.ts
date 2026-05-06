@@ -6,10 +6,16 @@ import {
   getShopOrders,
   updateOrderStatus,
   verifyDeliveryOTP,
+  getSurgeInfo,
 } from './orders.service'
 import { db } from '../../shared/db/knex'
 
 export async function orderRoutes(server: FastifyInstance) {
+
+  // GET /orders/surge — returns current surge pricing info (no auth needed)
+  server.get('/orders/surge', async (_request, reply) => {
+    return reply.send(getSurgeInfo())
+  })
 
   // POST /customers/push-token — save customer Expo push token
   server.post('/customers/push-token', async (req, reply) => {
@@ -81,6 +87,68 @@ export async function orderRoutes(server: FastifyInstance) {
     }
   })
 
+  // GET /orders/:orderId/rider-location — live rider coords for the map
+  server.get('/orders/:orderId/rider-location', async (request, reply) => {
+    try { await request.jwtVerify() } catch { return reply.status(401).send({ error: 'Unauthorized' }) }
+
+    const { orderId } = request.params as { orderId: string }
+    const { redis } = await import('../../shared/redis')
+
+    try {
+      const order = await db('orders as o')
+        .leftJoin('riders as r', 'r.id', 'o.rider_id')
+        .leftJoin('shops as s', 's.id', 'o.shop_id')
+        .where('o.id', orderId)
+        .select(
+          'o.rider_id', 'o.delivery_address',
+          'o.status',
+          'r.name as rider_name', 'r.lat as rider_lat', 'r.lng as rider_lng',
+          's.lat as shop_lat', 's.lng as shop_lng', 's.name as shop_name',
+        )
+        .first()
+
+      if (!order) return reply.status(404).send({ error: 'Order not found' })
+
+      // Prefer Redis for freshest rider coords (updated every 15s by rider app)
+      let riderLat = order.rider_lat ? parseFloat(order.rider_lat) : null
+      let riderLng = order.rider_lng ? parseFloat(order.rider_lng) : null
+
+      if (order.rider_id) {
+        const cached = await redis.get(`rider_location:${order.rider_id}`)
+        if (cached) {
+          const parsed = JSON.parse(cached)
+          riderLat = parsed.lat
+          riderLng = parsed.lng
+        }
+      }
+
+      const addr = typeof order.delivery_address === 'string'
+        ? JSON.parse(order.delivery_address)
+        : order.delivery_address
+
+      return reply.send({
+        status: order.status,
+        rider: order.rider_id && riderLat ? {
+          name: order.rider_name,
+          lat: riderLat,
+          lng: riderLng,
+        } : null,
+        shop: order.shop_lat ? {
+          name: order.shop_name,
+          lat: parseFloat(order.shop_lat),
+          lng: parseFloat(order.shop_lng),
+        } : null,
+        delivery: addr?.lat ? {
+          lat: parseFloat(addr.lat),
+          lng: parseFloat(addr.lng),
+          address: [addr.line1, addr.city].filter(Boolean).join(', '),
+        } : null,
+      })
+    } catch (err: any) {
+      return reply.status(500).send({ error: err.message })
+    }
+  })
+
   // GET /orders — get my orders (customer)
   server.get('/orders', async (request, reply) => {
     try {
@@ -127,6 +195,23 @@ export async function orderRoutes(server: FastifyInstance) {
     const allowed = ['confirmed', 'assigned', 'picked_up', 'cancelled']
     if (!allowed.includes(status)) {
       return reply.status(400).send({ error: `status must be one of: ${allowed.join(', ')}` })
+    }
+
+    // Prevent cancellation once a rider has accepted the order
+    if (status === 'cancelled') {
+      const { db } = await import('../../shared/db/knex')
+      const current = await db('orders').where({ id: orderId }).first()
+      if (!current) return reply.status(404).send({ error: 'Order not found' })
+      const nonCancellable = ['assigned', 'picked_up', 'delivered']
+      if (nonCancellable.includes(current.status)) {
+        return reply.status(400).send({
+          error: `Cannot cancel — rider has already ${
+            current.status === 'assigned' ? 'accepted the order' :
+            current.status === 'picked_up' ? 'picked up the order' :
+            'delivered the order'
+          }`
+        })
+      }
     }
 
     const extra = reason ? { cancellation_reason: reason } : {}

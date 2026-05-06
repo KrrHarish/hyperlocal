@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Platform,
-  ScrollView, ActivityIndicator, Vibration, Alert, RefreshControl,
+  ScrollView, ActivityIndicator, Vibration, Alert, RefreshControl, AppState,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -60,31 +60,28 @@ export default function HomeScreen({ navigation }: any) {
   const playChime = useCallback(async () => {
     try {
       await Audio.setAudioModeAsync({ playsInSilentModeIOS: true, staysActiveInBackground: true });
-      // Play the 4-note chime twice for urgency
-      for (let i = 0; i < 2; i++) {
-        if (i > 0) await new Promise<void>(r => setTimeout(r, 400));
-        const { sound } = await Audio.Sound.createAsync(
-          require('../../assets/new_order.wav'),
-          { shouldPlay: true, volume: 1.0 }
-        );
-        sound.setOnPlaybackStatusUpdate(status => {
-          if (status.isLoaded && status.didJustFinish) sound.unloadAsync().catch(() => {});
-        });
-      }
+      const { sound } = await Audio.Sound.createAsync(
+        require('../../assets/new_order.wav'),
+        { shouldPlay: true, volume: 1.0 }
+      );
+      sound.setOnPlaybackStatusUpdate(status => {
+        if (status.isLoaded && status.didJustFinish) sound.unloadAsync().catch(() => {});
+      });
     } catch {}
   }, []);
 
-  const fireOrderNotification = useCallback((offer: IncomingOrder) => {
+  const fireOrderNotification = useCallback((offer: IncomingOrder, withSound: boolean) => {
     Notifications.scheduleNotificationAsync({
       content: {
         title: '🛵 New Delivery Order!',
         body: `${offer.shopName || 'Nearby Shop'} · ₹${offer.deliveryFee.toFixed(0)} delivery fee · ${offer.distanceKm?.toFixed(1) ?? '?'} km away`,
-        sound: true,
+        // Sound only when app is backgrounded/locked — expo-av handles it when foregrounded
+        sound: withSound,
         priority: Notifications.AndroidNotificationPriority.MAX,
         vibrate: [0, 400, 200, 400],
         data: { orderId: offer.orderId },
       },
-      trigger: null, // fire immediately
+      trigger: null,
     }).catch(() => {});
   }, []);
 
@@ -118,12 +115,23 @@ export default function HomeScreen({ navigation }: any) {
   // ── Fetch earnings + active order ─────────────────────────
   const refresh = useCallback(async () => {
     try {
-      const [earRes, activeRes] = await Promise.all([getEarnings(), getActiveOrder()]);
-      if (mountedRef.current) {
-        setEarnings(earRes.data.earnings);
-        setActiveOrder(activeRes.data.order);
-        if (activeRes.data.order && ['assigned', 'picked_up'].includes(activeRes.data.order.status)) {
-          navigation.navigate('ActiveDelivery', { order: activeRes.data.order });
+      const [earRes, activeRes] = await Promise.allSettled([getEarnings(), getActiveOrder()]);
+
+      if (!mountedRef.current) return;
+
+      if (earRes.status === 'fulfilled') {
+        setEarnings(earRes.value.data.earnings);
+      }
+
+      if (activeRes.status === 'fulfilled') {
+        const order = activeRes.value.data.order;
+        setActiveOrder(order);
+        // Auto-navigate to active delivery if one exists (e.g. after app reopen)
+        if (order && ['assigned', 'picked_up', 'out_for_delivery'].includes(order.status)) {
+          // Small delay so the navigator is fully mounted before pushing
+          setTimeout(() => {
+            if (mountedRef.current) navigation.navigate('ActiveDelivery', { order });
+          }, 300);
         }
       }
     } catch {}
@@ -163,7 +171,12 @@ export default function HomeScreen({ navigation }: any) {
 
           // ── Order offered to THIS rider ──
           if (event.type === 'order_offered' && event.riderId === rider.id) {
-            playChime();
+            const isForegrounded = AppState.currentState === 'active';
+
+            if (isForegrounded) {
+              // App is visible — use expo-av for high-volume custom sound
+              playChime();
+            }
             Vibration.vibrate([0, 400, 200, 400, 200, 400]);
 
             const offer: IncomingOrder = {
@@ -176,8 +189,8 @@ export default function HomeScreen({ navigation }: any) {
               distanceKm:  event.distanceKm,
             };
 
-            // Fire local notification so sound plays in background too
-            fireOrderNotification(offer);
+            // Notification: carry OS sound only when backgrounded/locked
+            fireOrderNotification(offer, !isForegrounded);
 
             if (mountedRef.current) {
               setIncomingOrder(offer);
@@ -254,7 +267,25 @@ export default function HomeScreen({ navigation }: any) {
           return;
         }
         const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-        await toggleOnline(true, loc.coords.latitude, loc.coords.longitude);
+        const { latitude, longitude } = loc.coords;
+
+        // ── GPS sanity check: India bounding box (lat 6–38, lng 68–98) ──
+        const isInIndia = latitude >= 6 && latitude <= 38 && longitude >= 68 && longitude <= 98;
+        if (!isInIndia) {
+          setToggling(false);
+          Alert.alert(
+            '⚠️ Incorrect GPS Location',
+            `Your GPS shows ${latitude.toFixed(4)}, ${longitude.toFixed(4)} — this is outside India.\n\n` +
+            `Orders will never be assigned at this location.\n\n` +
+            `If you're on a simulator, open Terminal and run:\n` +
+            `xcrun simctl location booted set 12.9352,77.6245\n\n` +
+            `Then tap GO ONLINE again.`,
+            [{ text: 'OK', style: 'default' }]
+          );
+          return;
+        }
+
+        await toggleOnline(true, latitude, longitude);
         setIsOnline(true);
         updateRider({ is_online: true });
       } else {

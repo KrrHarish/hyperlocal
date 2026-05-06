@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   ActivityIndicator, Platform, Alert,
@@ -6,9 +6,9 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useCart } from '../store/CartContext';
-import { placeOrder } from '../services/api';
+import { placeOrder, checkRiderAvailability, WS_URL } from '../services/api';
 
-const DELIVERY_ADDRESS = {
+const DEFAULT_DELIVERY_ADDRESS = {
   line1:   '123, 5th Cross',
   city:    'Bengaluru',
   pincode: '560102',
@@ -18,16 +18,95 @@ const DELIVERY_ADDRESS = {
 
 export default function CartScreen({ navigation }: any) {
   const { items, shopId, shopName, updateQty, removeItem, clearCart, total, itemCount } = useCart();
-  const [loading, setLoading] = useState(false);
-  const [tip, setTip]         = useState(0);
+  const [loading, setLoading]               = useState(false);
+  const [tip, setTip]                       = useState(0);
+  const [deliveryAddress, setDeliveryAddress] = useState(DEFAULT_DELIVERY_ADDRESS);
+  const [ridersAvailable, setRidersAvailable] = useState<boolean | null>(null);
+  const [availChecking, setAvailChecking]     = useState(false);
+
+  // Check rider availability whenever shopId changes or screen mounts
+  const checkAvailability = useCallback(async () => {
+    if (!shopId) return;
+    setAvailChecking(true);
+    try {
+      const res = await checkRiderAvailability(shopId);
+      setRidersAvailable(res.data?.available ?? true);
+    } catch {
+      setRidersAvailable(true); // fail open — don't block on network error
+    } finally {
+      setAvailChecking(false);
+    }
+  }, [shopId]);
+
+  // ── Real-time availability via WebSocket ──────────────────────────────────
+  // When any rider goes online or offline the server broadcasts rider_online /
+  // rider_offline. We re-check immediately so the button state is instant.
+  // A 60s fallback poll covers the case where the socket is disconnected.
+  useEffect(() => {
+    if (!shopId) return;
+
+    checkAvailability(); // immediate check on mount
+
+    let ws: WebSocket | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let destroyed = false;
+
+    const connect = () => {
+      if (destroyed) return;
+      ws = new WebSocket(WS_URL);
+      ws.onmessage = (e) => {
+        try {
+          const event = JSON.parse(e.data);
+          if (event.type === 'rider_online' || event.type === 'rider_offline') {
+            checkAvailability(); // re-check instantly on any rider status change
+          }
+        } catch {}
+      };
+      ws.onclose = () => {
+        if (!destroyed) reconnectTimer = setTimeout(connect, 3000);
+      };
+      ws.onerror = () => ws?.close();
+    };
+
+    connect();
+
+    // Fallback poll every 60s — catches edge cases where WS message was missed
+    const fallback = setInterval(checkAvailability, 60000);
+
+    return () => {
+      destroyed = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      ws?.close();
+      clearInterval(fallback);
+    };
+  }, [shopId, checkAvailability]);
 
   const deliveryFee = total >= 500 ? 0 : total >= 200 ? 25 : 40;
   const grandTotal  = total + deliveryFee + tip;
 
   const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+  const handleOpenAddressPicker = () => {
+    navigation.navigate('Addresses', {
+      pickerMode: true,
+      onPick: (addr: any) => {
+        // Parse saved address into delivery address shape
+        setDeliveryAddress({
+          line1:   addr.full_address || addr.line1 || '',
+          city:    addr.city || 'Bengaluru',
+          pincode: addr.pincode || '560000',
+          lat:     parseFloat(addr.lat) || DEFAULT_DELIVERY_ADDRESS.lat,
+          lng:     parseFloat(addr.lng) || DEFAULT_DELIVERY_ADDRESS.lng,
+        });
+      },
+    });
+  };
+
   const handlePlaceOrder = async () => {
     if (!shopId) return;
+
+    // Hard block — no riders available
+    if (ridersAvailable === false) return;
 
     // Guard: make sure all product IDs are real UUIDs (not leftover mock IDs like "g1", "g2")
     const badItems = items.filter(i => !UUID_RE.test(i.product_id));
@@ -48,7 +127,7 @@ export default function CartScreen({ navigation }: any) {
       const res = await placeOrder({
         shop_id: shopId,
         items: items.map(i => ({ shop_product_id: i.product_id, quantity: i.quantity })),
-        delivery_address: DELIVERY_ADDRESS,
+        delivery_address: deliveryAddress,
       });
       const orderId = res.data?.order?.id || res.data?.order_id || res.data?.id;
       if (!orderId) throw new Error('No order ID returned from server');
@@ -98,7 +177,7 @@ export default function CartScreen({ navigation }: any) {
           </View>
           <Text style={s.emptyT}>Your cart is empty</Text>
           <Text style={s.emptySub}>Add items from a nearby shop to get started</Text>
-          <TouchableOpacity style={s.browseBtn} onPress={() => navigation.navigate('Home')}>
+          <TouchableOpacity style={s.browseBtn} onPress={() => navigation.navigate('HomeTab')}>
             <LinearGradient colors={['#FF8A00','#FF5C00']} style={s.browseBtnGrad}
               start={{ x:0,y:0 }} end={{ x:1,y:0 }}>
               <Text style={s.browseBtnTxt}>Browse Shops</Text>
@@ -177,12 +256,16 @@ export default function CartScreen({ navigation }: any) {
           </View>
           <View style={{ flex: 1 }}>
             <Text style={s.addressLabel}>Delivering to</Text>
-            <Text style={s.addressText}>{DELIVERY_ADDRESS.line1}, {DELIVERY_ADDRESS.city} - {DELIVERY_ADDRESS.pincode}</Text>
+            <Text style={s.addressText}>{deliveryAddress.line1}, {deliveryAddress.city} - {deliveryAddress.pincode}</Text>
           </View>
-          <TouchableOpacity style={s.changeBtn}>
+          <TouchableOpacity style={s.changeBtn} onPress={handleOpenAddressPicker}>
             <Text style={s.changeTxt}>Change</Text>
           </TouchableOpacity>
         </View>
+        <TouchableOpacity style={s.savedAddrBtn} onPress={handleOpenAddressPicker}>
+          <Ionicons name="bookmark-outline" size={14} color="#FF8A00" />
+          <Text style={s.savedAddrTxt}>Use Saved Address</Text>
+        </TouchableOpacity>
 
         {/* Tip section */}
         <View style={s.tipCard}>
@@ -245,18 +328,44 @@ export default function CartScreen({ navigation }: any) {
         <View style={{ height: 110 }} />
       </ScrollView>
 
+      {/* No riders banner — shown above footer when unavailable */}
+      {ridersAvailable === false && (
+        <View style={s.noRiderBanner}>
+          <View style={s.noRiderIconWrap}>
+            <Text style={{ fontSize: 22 }}>🛵</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={s.noRiderTitle}>No riders available right now</Text>
+            <Text style={s.noRiderSub}>Button unlocks automatically when a rider is available</Text>
+          </View>
+          <TouchableOpacity onPress={checkAvailability} disabled={availChecking} style={s.retryBtn}>
+            {availChecking
+              ? <ActivityIndicator size="small" color="#FF8A00" />
+              : <Text style={s.retryTxt}>Retry</Text>
+            }
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* Place order footer */}
       <View style={s.footer}>
         <View>
           <Text style={s.footerLbl}>To Pay</Text>
           <Text style={s.footerTotal}>₹{grandTotal}</Text>
         </View>
-        <TouchableOpacity onPress={handlePlaceOrder} disabled={loading}
+        <TouchableOpacity
+          onPress={handlePlaceOrder}
+          disabled={loading || ridersAvailable === false || availChecking}
           style={{ flex: 1 }} activeOpacity={0.88}>
-          <LinearGradient colors={['#FF8A00','#FF5C00']} style={s.placeBtn}
-            start={{ x:0,y:0 }} end={{ x:1,y:0 }}>
+          <LinearGradient
+            colors={ridersAvailable === false ? ['#CCC', '#BBB'] : ['#FF8A00','#FF5C00']}
+            style={s.placeBtn} start={{ x:0,y:0 }} end={{ x:1,y:0 }}>
             {loading
               ? <ActivityIndicator color="#fff" />
+              : availChecking
+              ? <><ActivityIndicator color="#fff" size="small" /><Text style={s.placeBtnTxt}>Checking…</Text></>
+              : ridersAvailable === false
+              ? <Text style={s.placeBtnTxt}>No Riders Available</Text>
               : <>
                   <Text style={s.placeBtnTxt}>Place Order</Text>
                   <Ionicons name="arrow-forward" size={18} color="#fff" />
@@ -324,6 +433,11 @@ const s = StyleSheet.create({
   addressText:  { fontSize: 13, color: '#333', fontWeight: '500', lineHeight: 18 },
   changeBtn:    { backgroundColor: '#FFF4E6', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 },
   changeTxt:    { fontSize: 12, color: '#FF8A00', fontWeight: '700' },
+  savedAddrBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-end',
+                   marginHorizontal: 16, marginTop: -6, marginBottom: 6,
+                   paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8,
+                   backgroundColor: '#FFF4E6' },
+  savedAddrTxt: { fontSize: 12, color: '#FF8A00', fontWeight: '700' },
 
   tipCard:      { backgroundColor: '#fff', marginHorizontal: 16, marginBottom: 12, borderRadius: 18, padding: 16,
                    shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 8, shadowOffset: { width:0,height:2 } },
@@ -353,6 +467,18 @@ const s = StyleSheet.create({
   safetyNote:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
                    gap: 6, marginBottom: 16 },
   safetyTxt:    { fontSize: 12, color: '#22C55E', fontWeight: '600' },
+
+  noRiderBanner:{ flexDirection: 'row', alignItems: 'center', gap: 12,
+                   backgroundColor: '#FFF4E6', borderTopWidth: 1, borderTopColor: '#FFE0B2',
+                   paddingHorizontal: 16, paddingVertical: 12 },
+  noRiderIconWrap:{ width: 44, height: 44, borderRadius: 12, backgroundColor: '#FFE0B2',
+                   alignItems: 'center', justifyContent: 'center' },
+  noRiderTitle: { fontSize: 13, fontWeight: '700', color: '#C05600', marginBottom: 2 },
+  noRiderSub:   { fontSize: 11, color: '#E07020', lineHeight: 15 },
+  retryBtn:     { paddingHorizontal: 14, paddingVertical: 8, backgroundColor: '#fff',
+                   borderRadius: 10, borderWidth: 1.5, borderColor: '#FF8A00',
+                   minWidth: 56, alignItems: 'center', justifyContent: 'center' },
+  retryTxt:     { fontSize: 13, fontWeight: '700', color: '#FF8A00' },
 
   footer:       { flexDirection: 'row', alignItems: 'center', gap: 16, padding: 16,
                    paddingBottom: Platform.OS === 'ios' ? 32 : 16,

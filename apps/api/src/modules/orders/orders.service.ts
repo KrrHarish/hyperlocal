@@ -3,11 +3,26 @@ import { sendPushToShop } from '../../shared/push'
 import { sendPushToCustomer } from '../../shared/expoPush'
 import { broadcast } from '../../shared/realtime'
 
-// Calculate delivery fee based on distance (simple for prototype)
-function calculateDeliveryFee(orderTotal: number): number {
-  if (orderTotal >= 500) return 0
-  if (orderTotal >= 200) return 25
-  return 40
+// Calculate delivery fee with time-based surge pricing
+async function calculateDeliveryFee(orderTotal: number): Promise<number> {
+  const base = orderTotal >= 500 ? 0 : orderTotal >= 200 ? 25 : 40
+  if (base === 0) return 0 // free delivery stays free
+
+  const hour = new Date().getHours() // local time (IST when deployed in India)
+  let surge = 1.0
+  if (hour >= 7  && hour < 9)  surge = 1.2  // morning rush
+  if (hour >= 12 && hour < 14) surge = 1.3  // lunch rush
+  if (hour >= 18 && hour < 21) surge = 1.5  // dinner rush
+
+  return Math.round(base * surge)
+}
+
+export function getSurgeInfo(): { active: boolean; multiplier: number; label: string } {
+  const hour = new Date().getHours()
+  if (hour >= 7  && hour < 9)  return { active: true,  multiplier: 1.2, label: 'Morning Rush' }
+  if (hour >= 12 && hour < 14) return { active: true,  multiplier: 1.3, label: 'Lunch Rush' }
+  if (hour >= 18 && hour < 21) return { active: true,  multiplier: 1.5, label: 'Dinner Rush' }
+  return { active: false, multiplier: 1.0, label: 'Normal' }
 }
 
 // Generate a 4-digit OTP for delivery confirmation
@@ -25,6 +40,7 @@ export async function placeOrder(customerId: string, data: {
     lat: number
     lng: number
   }
+  promo_code?: string
 }) {
   // Fetch all products being ordered
   const productIds = data.items.map(i => i.shop_product_id)
@@ -57,8 +73,35 @@ export async function placeOrder(customerId: string, data: {
   })
 
   const subtotal = orderItems.reduce((sum, i) => sum + i.subtotal, 0)
-  const deliveryFee = calculateDeliveryFee(subtotal)
-  const totalAmount = subtotal + deliveryFee
+  const deliveryFee = await calculateDeliveryFee(subtotal)
+
+  // Apply promo code discount if provided
+  let discountAmount = 0
+  if (data.promo_code) {
+    const promo = await db('promo_codes')
+      .whereRaw('LOWER(code) = LOWER(?)', [data.promo_code])
+      .where('is_active', true)
+      .first()
+
+    if (promo &&
+        promo.uses_count < promo.max_uses &&
+        (!promo.valid_to || new Date(promo.valid_to) > new Date()) &&
+        subtotal >= parseFloat(promo.min_order)
+    ) {
+      const value = parseFloat(promo.value)
+      const maxDiscount = promo.max_discount ? parseFloat(promo.max_discount) : Infinity
+      if (promo.type === 'percent') {
+        discountAmount = Math.min((subtotal * value) / 100, maxDiscount)
+      } else {
+        discountAmount = value
+      }
+      discountAmount = Math.round(discountAmount * 100) / 100
+      // Increment uses_count
+      await db('promo_codes').where({ id: promo.id }).increment('uses_count', 1)
+    }
+  }
+
+  const totalAmount = Math.max(0, subtotal + deliveryFee - discountAmount)
 
   // Get shop commission rate
   const shop = await db('shops').where({ id: data.shop_id }).first()
@@ -185,7 +228,26 @@ export async function updateOrderStatus(orderId: string, status: string, extra =
     const shop = await db('shops').where({ id: confirmed?.shop_id }).first()
     if (shop?.lat && shop?.lng) {
       const { offerOrderToRider } = await import('../riders/riders.service')
-      await offerOrderToRider(orderId, confirmed.shop_id, parseFloat(shop.lat), parseFloat(shop.lng))
+      const rider = await offerOrderToRider(orderId, confirmed.shop_id, parseFloat(shop.lat), parseFloat(shop.lng))
+
+      // No riders available right now — retry every 30s for up to 5 minutes
+      if (!rider) {
+        let attempts = 0
+        const maxAttempts = 10
+        const retryInterval = setInterval(async () => {
+          attempts++
+          // Stop if order was assigned, cancelled, or max retries reached
+          const current = await db('orders').where({ id: orderId }).first()
+          if (!current || current.status !== 'confirmed' || attempts >= maxAttempts) {
+            clearInterval(retryInterval)
+            if (current?.status === 'confirmed' && attempts >= maxAttempts) {
+              broadcast({ type: 'order_no_riders', orderId, shopId: confirmed.shop_id })
+            }
+            return
+          }
+          await offerOrderToRider(orderId, confirmed.shop_id, parseFloat(shop.lat), parseFloat(shop.lng))
+        }, 30000)
+      }
     }
 
     return confirmed

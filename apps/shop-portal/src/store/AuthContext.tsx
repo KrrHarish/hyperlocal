@@ -63,6 +63,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = async (newToken: string) => {
     localStorage.setItem('zuqu_owner_token', newToken)
     setToken(newToken)
+    // refreshShop will be triggered by the token useEffect above
   }
 
   return (

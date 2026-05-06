@@ -9,7 +9,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import { getNearbyShops, getProductsByCategory } from '../services/api';
+import { getNearbyShops, getProductsByCategory, IMAGE_BASE } from '../services/api';
 import { useCart } from '../store/CartContext';
 import { useProductSocket } from '../hooks/useProductSocket';
 
@@ -86,7 +86,7 @@ function productEmoji(name: string, category: string): string {
 
 // ─── COMPONENT ──────────────────────────────────────────────────
 export default function HomeScreen({ navigation }: any) {
-  const [search]                        = useState('');
+  const [search]                        = useState(''); // kept for filtered shops logic
   const [category, setCategory]        = useState('all');
   const [shops, setShops]              = useState<any[]>([]);
   const [loading, setLoading]          = useState(true);
@@ -160,6 +160,7 @@ export default function HomeScreen({ navigation }: any) {
               id: s.id, name: s.name, category: s.category || 'grocery',
               address: s.address || '',
               lat: s.lat, lng: s.lng,
+              image_url: s.image_url ? `${IMAGE_BASE}${s.image_url}` : null,
               distance: distKm != null
                 ? distKm < 1 ? `${Math.round(distKm * 1000)} m` : `${distKm.toFixed(1)} km`
                 : 'Nearby',
@@ -259,8 +260,9 @@ export default function HomeScreen({ navigation }: any) {
           </View>
         </View>
 
-        {/* Search bar */}
-        <TouchableOpacity style={s.searchBar} activeOpacity={0.85}>
+        {/* Search bar — tapping opens SearchScreen */}
+        <TouchableOpacity style={s.searchBar} activeOpacity={0.85}
+          onPress={() => navigation.navigate('Search')}>
           <Ionicons name="search-outline" size={18} color="#999" />
           <Text style={s.searchPlaceholder}>Search shops, products, brands…</Text>
           <View style={s.searchFilter}>
@@ -381,9 +383,13 @@ export default function HomeScreen({ navigation }: any) {
               {shops.filter(s => s.is_open).slice(0,4).map(shop => (
                 <TouchableOpacity key={shop.id} style={s.featuredCard}
                   onPress={() => navigation.navigate('Shop', { shop })} activeOpacity={0.88}>
-                  <LinearGradient colors={['#FFF4E6','#FFE8CC']} style={s.featuredImg}>
-                    <Text style={{ fontSize:32 }}>🏪</Text>
-                  </LinearGradient>
+                  {shop.image_url ? (
+                    <Image source={{ uri: shop.image_url }} style={s.featuredImg} resizeMode="cover" />
+                  ) : (
+                    <LinearGradient colors={['#FFF4E6','#FFE8CC']} style={s.featuredImg}>
+                      <Text style={{ fontSize:32 }}>{CATEGORY_EMOJI[shop.category] || '🏪'}</Text>
+                    </LinearGradient>
+                  )}
                   <View style={s.featuredInfo}>
                     <Text style={s.featuredName} numberOfLines={1}>{shop.name}</Text>
                     <View style={s.featuredMeta}>
@@ -543,14 +549,20 @@ export default function HomeScreen({ navigation }: any) {
                   onPress={() => navigation.navigate('Shop', { shop })} activeOpacity={0.88}>
 
                   {/* Shop image / icon */}
-                  <LinearGradient colors={['#FFF4E6','#FFE8CC']} style={s.shopImg}>
-                    <Text style={{ fontSize:30 }}>🏪</Text>
+                  <View style={s.shopImg}>
+                    {shop.image_url ? (
+                      <Image source={{ uri: shop.image_url }} style={{ width:'100%', height:'100%', borderRadius:14 }} resizeMode="cover" />
+                    ) : (
+                      <LinearGradient colors={['#FFF4E6','#FFE8CC']} style={{ flex:1, borderRadius:14, alignItems:'center', justifyContent:'center' }}>
+                        <Text style={{ fontSize:30 }}>{CATEGORY_EMOJI[shop.category] || '🏪'}</Text>
+                      </LinearGradient>
+                    )}
                     {!shop.is_open && (
                       <View style={s.closedOverlay}>
                         <Text style={s.closedTxt}>CLOSED</Text>
                       </View>
                     )}
-                  </LinearGradient>
+                  </View>
 
                   {/* Info */}
                   <View style={{ flex:1 }}>

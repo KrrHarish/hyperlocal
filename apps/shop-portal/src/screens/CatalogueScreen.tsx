@@ -301,6 +301,10 @@ export default function CatalogueScreen() {
               }}
             />
           </div>
+          <button onClick={fetchProducts} title="Refresh catalogue"
+            style={{ padding:'9px 12px', border:'1.5px solid var(--gray-200)', borderRadius:8, background:'white', fontSize:15, cursor:'pointer', color:'var(--gray-500)' }}>
+            ↺
+          </button>
           <button className="btn-primary" onClick={() => setShowAdd(true)} style={{ padding:'9px 20px', whiteSpace:'nowrap' }}>
             + Add Product
           </button>
@@ -312,8 +316,14 @@ export default function CatalogueScreen() {
         <div className="card" style={{ textAlign:'center', padding:60 }}>
           <div style={{ fontSize:48, marginBottom:12 }}>📦</div>
           <div style={{ fontWeight:600, fontSize:16, marginBottom:8 }}>No products yet</div>
-          <div style={{ color:'var(--gray-400)', marginBottom:20 }}>Add products from the master catalogue to start selling</div>
-          <button className="btn-primary" onClick={() => setShowAdd(true)}>+ Add Your First Product</button>
+          <div style={{ color:'var(--gray-400)', marginBottom:20 }}>If your admin has set up a catalogue, click Refresh below</div>
+          <div style={{ display:'flex', gap:10, justifyContent:'center' }}>
+            <button onClick={fetchProducts}
+              style={{ padding:'10px 20px', border:'1.5px solid var(--gray-200)', borderRadius:8, background:'white', fontWeight:600, fontSize:13, cursor:'pointer', color:'var(--gray-600)' }}>
+              ↺ Refresh
+            </button>
+            <button className="btn-primary" onClick={() => setShowAdd(true)}>+ Add Your First Product</button>
+          </div>
         </div>
       ) : (
         Object.entries(grouped).map(([category, items]) => (

@@ -17,6 +17,8 @@ import OrderTrackingScreen from '../screens/OrderTrackingScreen';
 import OrdersScreen        from '../screens/OrdersScreen';
 import ProfileScreen       from '../screens/ProfileScreen';
 import ProductDetailScreen from '../screens/ProductDetailScreen';
+import SearchScreen        from '../screens/SearchScreen';
+import AddressesScreen     from '../screens/AddressesScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab   = createBottomTabNavigator();
@@ -45,6 +47,8 @@ function HomeStack() {
       <Stack.Screen name="OrderTracking" component={OrderTrackingScreen} />
       <Stack.Screen name="Profile"       component={ProfileScreen} />
       <Stack.Screen name="ProductDetail"  component={ProductDetailScreen} />
+      <Stack.Screen name="Search"        component={SearchScreen} />
+      <Stack.Screen name="Addresses"     component={AddressesScreen} />
     </Stack.Navigator>
   );
 }
@@ -59,6 +63,7 @@ function OrdersStack() {
       <Stack.Screen name="Shop"          component={ShopScreen} />
       <Stack.Screen name="Cart"          component={CartScreen} />
       <Stack.Screen name="ProductDetail"  component={ProductDetailScreen} />
+      <Stack.Screen name="Addresses"     component={AddressesScreen} />
     </Stack.Navigator>
   );
 }
@@ -69,6 +74,7 @@ function CartStack() {
     <Stack.Navigator screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
       <Stack.Screen name="CartMain"      component={CartScreen} />
       <Stack.Screen name="OrderTracking" component={OrderTrackingScreen} />
+      <Stack.Screen name="Addresses"     component={AddressesScreen} />
     </Stack.Navigator>
   );
 }

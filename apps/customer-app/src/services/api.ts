@@ -12,6 +12,15 @@ const getBaseURL = () => {
 
 export const API_BASE = getBaseURL();
 
+// Base URL for static assets (images) — strips the /api suffix
+export const IMAGE_BASE = __DEV__
+  ? (Platform.OS === 'android' ? 'http://10.0.2.2:3000' : 'http://localhost:3000')
+  : 'https://api.zuqu.in';
+
+export const WS_URL = __DEV__
+  ? (Platform.OS === 'android' ? 'ws://10.0.2.2:3000/ws' : 'ws://localhost:3000/ws')
+  : 'wss://api.zuqu.in/ws';
+
 const api = axios.create({
   baseURL: API_BASE,
   timeout: 10000,
@@ -36,10 +45,10 @@ api.interceptors.response.use(
 
 // ── AUTH ──────────────────────────────────────────────
 export const sendOTP = (phone: string) =>
-  api.post('/auth/send-otp', { phone });
+  api.post('/auth/otp/send', { phone });
 
 export const verifyOTP = (phone: string, otp: string) =>
-  api.post('/auth/verify-otp', { phone, otp });
+  api.post('/auth/otp/verify', { phone, otp });
 
 // ── SHOPS ─────────────────────────────────────────────
 export const getNearbyShops = (lat: number, lng: number, radius = 3000) =>
@@ -57,6 +66,10 @@ export const searchProducts = (query: string) =>
 
 export const getProductsByCategory = (category: string) =>
   api.get('/products/by-category', { params: { category } });
+
+// ── RIDERS ────────────────────────────────────────────
+export const checkRiderAvailability = (shopId: string) =>
+  api.get('/riders/available', { params: { shop_id: shopId } });
 
 // ── ORDERS ────────────────────────────────────────────
 export const placeOrder = (payload: {
@@ -77,10 +90,35 @@ export const getMyOrders = () =>
 export const getOrderById = (orderId: string) =>
   api.get(`/orders/${orderId}`);
 
+export const getRiderLocation = (orderId: string) =>
+  api.get(`/orders/${orderId}/rider-location`);
+
 export const confirmDeliveryOTP = (orderId: string, otp: string) =>
   api.post(`/orders/${orderId}/deliver`, { otp });
 
 export const cancelOrder = (orderId: string, reason?: string) =>
   api.post(`/orders/${orderId}/cancel`, { reason });
+
+export const getOrderRating = (orderId: string) =>
+  api.get(`/orders/${orderId}/rating`);
+
+export const rateOrder = (orderId: string, payload: { rider_rating: number; shop_rating: number; review?: string }) =>
+  api.post(`/orders/${orderId}/rate`, payload);
+
+// ── ADDRESSES ─────────────────────────────────────────
+export const getAddresses = () =>
+  api.get('/addresses');
+
+export const createAddress = (payload: { label: string; full_address: string; lat?: number; lng?: number }) =>
+  api.post('/addresses', payload);
+
+export const updateAddress = (id: string, payload: Partial<{ label: string; full_address: string; lat?: number; lng?: number }>) =>
+  api.patch(`/addresses/${id}`, payload);
+
+export const deleteAddress = (id: string) =>
+  api.delete(`/addresses/${id}`);
+
+export const setDefaultAddress = (id: string) =>
+  api.patch(`/addresses/${id}/default`);
 
 export default api;

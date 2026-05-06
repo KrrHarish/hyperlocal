@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  ActivityIndicator, RefreshControl, Platform, Animated,
+  ActivityIndicator, RefreshControl, Platform, Animated, Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { getMyOrders } from '../services/api';
+import { getMyOrders, getOrderById } from '../services/api';
 
 const WS_URL = Platform.OS === 'android'
   ? 'ws://10.0.2.2:3000/ws'
@@ -51,10 +51,29 @@ export default function OrdersScreen({ navigation }: any) {
   const [refreshing, setRefreshing]     = useState(false);
   const [tab, setTab]                   = useState<'active'|'past'>('active');
   const [cancelledAlert, setCancelledAlert] = useState<any | null>(null);
+  const [reorderingId, setReorderingId] = useState<string | null>(null);
   const slideAnim    = useRef(new Animated.Value(-100)).current;
   const mountedRef   = useRef(true);
   const prevStatuses = useRef<Record<string, string>>({});
   const isFirstFetch = useRef(true);
+
+  const handleReorder = useCallback(async (order: any) => {
+    setReorderingId(order.id);
+    try {
+      const res = await getOrderById(order.id);
+      const fullOrder = res.data?.order || res.data;
+      const shopId = fullOrder?.shop_id || order?.shop_id;
+      if (!shopId) throw new Error('Shop info missing');
+      navigation.navigate('HomeTab', {
+        screen: 'Shop',
+        params: { shopId, reorderItems: fullOrder?.items || [] },
+      });
+    } catch (err: any) {
+      Alert.alert('Reorder failed', err?.message || 'Could not load order details');
+    } finally {
+      setReorderingId(null);
+    }
+  }, [navigation]);
 
   const fetchOrders = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
@@ -326,9 +345,18 @@ export default function OrdersScreen({ navigation }: any) {
                         <Text style={s.trackTxt}>Track →</Text>
                       </TouchableOpacity>
                     ) : order.status === 'delivered' ? (
-                      <TouchableOpacity style={s.reorderBtn}>
-                        <Ionicons name="refresh-outline" size={12} color="#FF8A00" />
-                        <Text style={s.reorderTxt}>Reorder</Text>
+                      <TouchableOpacity
+                        style={s.reorderBtn}
+                        onPress={() => handleReorder(order)}
+                        disabled={reorderingId === order.id}
+                      >
+                        {reorderingId === order.id
+                          ? <ActivityIndicator size="small" color="#FF8A00" />
+                          : <>
+                              <Ionicons name="refresh-outline" size={12} color="#FF8A00" />
+                              <Text style={s.reorderTxt}>Reorder</Text>
+                            </>
+                        }
                       </TouchableOpacity>
                     ) : null}
                   </View>
