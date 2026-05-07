@@ -866,6 +866,67 @@ export async function adminRoutes(server: FastifyInstance) {
     return reply.send({ ok: true, username: username.trim().toLowerCase() })
   })
 
+  // ── GET /admin/riders/online — list all online (available) riders ────────────
+
+  server.get('/admin/riders/online', async (request, reply) => {
+    if (!(await requireAdmin(request, reply))) return
+
+    const riders = await db('riders')
+      .where({ is_online: true, is_suspended: false })
+      .select('id', 'name', 'phone', 'vehicle_type', 'lat', 'lng')
+      .orderBy('name', 'asc')
+
+    return reply.send({ riders })
+  })
+
+  // ── POST /admin/orders/:orderId/assign — force-assign a rider to an order ────
+
+  server.post('/admin/orders/:orderId/assign', async (request, reply) => {
+    if (!(await requireAdmin(request, reply))) return
+
+    const { orderId } = request.params as { orderId: string }
+    const { rider_id } = request.body as { rider_id: string }
+
+    if (!rider_id) return reply.status(400).send({ error: 'rider_id is required' })
+
+    const [order, rider] = await Promise.all([
+      db('orders').where({ id: orderId }).first(),
+      db('riders').where({ id: rider_id }).first(),
+    ])
+
+    if (!order) return reply.status(404).send({ error: 'Order not found' })
+    if (!rider) return reply.status(404).send({ error: 'Rider not found' })
+
+    const assignable = ['pending', 'confirmed', 'assigned']
+    if (!assignable.includes(order.status)) {
+      return reply.status(400).send({
+        error: `Cannot assign a rider to an order with status "${order.status}"`,
+      })
+    }
+
+    const [updated] = await db('orders')
+      .where({ id: orderId })
+      .update({ rider_id, status: 'assigned', assigned_at: new Date(), updated_at: new Date() })
+      .returning('*')
+
+    // Notify the rider's app — triggers the incoming order card + chime
+    const { broadcast } = await import('../../shared/realtime')
+    broadcast({
+      type:        'order_offered',
+      riderId:     rider_id,
+      orderId,
+      shopId:      updated.shop_id,
+      shopName:    order.shop_name,
+      total:       updated.total_amount,
+      deliveryFee: updated.delivery_fee,
+      preview:     '',
+    })
+    broadcast({ type: 'order_assigned', orderId, riderId: rider_id, shopId: updated.shop_id })
+    broadcast({ type: 'order_updated',  orderId, status: 'assigned', shopId: updated.shop_id })
+
+    return reply.send({ ok: true, order: updated })
+  })
+
   // ── POST /admin/riders — admin creates a rider directly ──────────────────────
 
   server.post('/admin/riders', async (request, reply) => {
@@ -883,5 +944,71 @@ export async function adminRoutes(server: FastifyInstance) {
       .returning('*')
 
     return reply.status(201).send({ rider })
+  })
+
+  // ── GET /platform-offers — public: active platform offers ────────────────────
+  server.get('/platform-offers', async (_request, reply) => {
+    const now = new Date()
+    const offers = await db('platform_offers')
+      .where({ is_active: true })
+      .where('valid_from', '<=', now)
+      .where(function () {
+        this.whereNull('valid_to').orWhere('valid_to', '>=', now)
+      })
+      .orderBy('created_at', 'asc')
+    return reply.send({ offers })
+  })
+
+  // ── GET /admin/platform-offers — list all (admin) ────────────────────────────
+  server.get('/admin/platform-offers', async (request, reply) => {
+    if (!(await requireAdmin(request, reply))) return
+    const offers = await db('platform_offers').orderBy('created_at', 'desc')
+    return reply.send({ offers })
+  })
+
+  // ── POST /admin/platform-offers — create ─────────────────────────────────────
+  server.post('/admin/platform-offers', async (request, reply) => {
+    if (!(await requireAdmin(request, reply))) return
+    const { title, subtitle, code_label, color, offer_type, value, min_order, valid_to } =
+      request.body as any
+    if (!title || !offer_type) {
+      return reply.status(400).send({ error: 'title and offer_type are required' })
+    }
+    const [offer] = await db('platform_offers').insert({
+      title,
+      subtitle:   subtitle   || null,
+      code_label: code_label || null,
+      color:      color      || 'orange',
+      offer_type,
+      value:      parseFloat(value)     || 0,
+      min_order:  parseFloat(min_order) || 0,
+      valid_to:   valid_to ? new Date(valid_to) : null,
+    }).returning('*')
+    return reply.status(201).send({ offer })
+  })
+
+  // ── PATCH /admin/platform-offers/:id — update ────────────────────────────────
+  server.patch('/admin/platform-offers/:id', async (request, reply) => {
+    if (!(await requireAdmin(request, reply))) return
+    const { id } = request.params as { id: string }
+    const body = request.body as any
+    const allowed = ['title', 'subtitle', 'code_label', 'color', 'offer_type',
+                     'value', 'min_order', 'is_active', 'valid_to']
+    const patch: any = { updated_at: new Date() }
+    for (const k of allowed) {
+      if (body[k] !== undefined) patch[k] = body[k]
+    }
+    if (body.valid_to) patch.valid_to = new Date(body.valid_to)
+    const [offer] = await db('platform_offers').where({ id }).update(patch).returning('*')
+    if (!offer) return reply.status(404).send({ error: 'Offer not found' })
+    return reply.send({ offer })
+  })
+
+  // ── DELETE /admin/platform-offers/:id ────────────────────────────────────────
+  server.delete('/admin/platform-offers/:id', async (request, reply) => {
+    if (!(await requireAdmin(request, reply))) return
+    const { id } = request.params as { id: string }
+    await db('platform_offers').where({ id }).delete()
+    return reply.send({ ok: true })
   })
 }

@@ -59,7 +59,6 @@ export default function HomeScreen({ navigation }: any) {
 
   const playChime = useCallback(async () => {
     try {
-      await Audio.setAudioModeAsync({ playsInSilentModeIOS: true, staysActiveInBackground: true });
       const { sound } = await Audio.Sound.createAsync(
         require('../../assets/new_order.wav'),
         { shouldPlay: true, volume: 1.0 }
@@ -67,7 +66,9 @@ export default function HomeScreen({ navigation }: any) {
       sound.setOnPlaybackStatusUpdate(status => {
         if (status.isLoaded && status.didJustFinish) sound.unloadAsync().catch(() => {});
       });
-    } catch {}
+    } catch (err) {
+      console.warn('[Rider] playChime failed:', err);
+    }
   }, []);
 
   const fireOrderNotification = useCallback((offer: IncomingOrder, withSound: boolean) => {
@@ -75,8 +76,8 @@ export default function HomeScreen({ navigation }: any) {
       content: {
         title: '🛵 New Delivery Order!',
         body: `${offer.shopName || 'Nearby Shop'} · ₹${offer.deliveryFee.toFixed(0)} delivery fee · ${offer.distanceKm?.toFixed(1) ?? '?'} km away`,
-        // Sound only when app is backgrounded/locked — expo-av handles it when foregrounded
-        sound: withSound,
+        // Use bundled sound file when backgrounded, silence when foregrounded (expo-av handles it)
+        sound: withSound ? 'new_order.wav' : false,
         priority: Notifications.AndroidNotificationPriority.MAX,
         vibrate: [0, 400, 200, 400],
         data: { orderId: offer.orderId },
@@ -140,8 +141,26 @@ export default function HomeScreen({ navigation }: any) {
   useEffect(() => {
     mountedRef.current = true;
     refresh();
-    // Request notification permission
-    Notifications.requestPermissionsAsync();
+
+    // Request notification permission and warn if denied
+    Notifications.requestPermissionsAsync().then(({ status }) => {
+      if (status !== 'granted') {
+        Alert.alert(
+          'Notifications blocked',
+          'Enable notifications in Settings so you hear new order alerts even when the app is in background.',
+          [{ text: 'OK' }]
+        );
+      }
+    }).catch(() => {});
+
+    // Prime audio session once at mount so first chime fires instantly
+    Audio.setAudioModeAsync({
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: true,
+      allowsRecordingIOS: false,
+      shouldDuckAndroid: false,
+    }).catch(() => {});
+
     return () => {
       mountedRef.current = false;
       clearCountdown();
@@ -173,10 +192,8 @@ export default function HomeScreen({ navigation }: any) {
           if (event.type === 'order_offered' && event.riderId === rider.id) {
             const isForegrounded = AppState.currentState === 'active';
 
-            if (isForegrounded) {
-              // App is visible — use expo-av for high-volume custom sound
-              playChime();
-            }
+            // Always play custom chime — expo-av works in background with UIBackgroundModes:audio
+            playChime();
             Vibration.vibrate([0, 400, 200, 400, 200, 400]);
 
             const offer: IncomingOrder = {
@@ -189,7 +206,7 @@ export default function HomeScreen({ navigation }: any) {
               distanceKm:  event.distanceKm,
             };
 
-            // Notification: carry OS sound only when backgrounded/locked
+            // Notification: add OS sound only when backgrounded (expo-av covers foreground)
             fireOrderNotification(offer, !isForegrounded);
 
             if (mountedRef.current) {

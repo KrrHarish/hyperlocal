@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { getOrders, BASE_URL } from '../api/client'
+import { getOrders, getOnlineRiders, assignOrderRider, BASE_URL } from '../api/client'
 import Badge from '../components/Badge'
 
 function fmt(n: number) { return `₹${Number(n || 0).toLocaleString('en-IN')}` }
@@ -17,6 +17,45 @@ export default function Orders() {
   const [pages,    setPages]    = useState(1)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [items,    setItems]    = useState<Record<string, any[]>>({})
+
+  // Rider assignment
+  const [onlineRiders,    setOnlineRiders]    = useState<any[]>([])
+  const [ridersLoaded,    setRidersLoaded]    = useState(false)
+  const [selectedRider,   setSelectedRider]   = useState<Record<string, string>>({})  // orderId → riderId
+  const [assigning,       setAssigning]       = useState<string | null>(null)          // orderId being assigned
+  const [assignResult,    setAssignResult]    = useState<Record<string, { ok: boolean; msg: string }>>({})
+
+  const loadOnlineRiders = async () => {
+    if (ridersLoaded) return
+    try {
+      const res = await getOnlineRiders()
+      setOnlineRiders(res.data.riders ?? [])
+      setRidersLoaded(true)
+    } catch {
+      setOnlineRiders([])
+    }
+  }
+
+  const handleAssign = async (orderId: string) => {
+    const riderId = selectedRider[orderId]
+    if (!riderId) return
+    setAssigning(orderId)
+    setAssignResult(prev => ({ ...prev, [orderId]: { ok: false, msg: '' } }))
+    try {
+      await assignOrderRider(orderId, riderId)
+      setAssignResult(prev => ({ ...prev, [orderId]: { ok: true, msg: '✓ Rider assigned' } }))
+      // Refresh order list so the rider name shows
+      setOrders(prev => prev.map(o =>
+        o.id === orderId
+          ? { ...o, rider_name: onlineRiders.find(r => r.id === riderId)?.name ?? o.rider_name, status: 'assigned' }
+          : o
+      ))
+    } catch (e: any) {
+      setAssignResult(prev => ({ ...prev, [orderId]: { ok: false, msg: e?.response?.data?.error ?? 'Failed to assign' } }))
+    } finally {
+      setAssigning(null)
+    }
+  }
 
   // Filters — all empty by default so ALL orders load on first visit
   const [status, setStatus] = useState('all')
@@ -67,9 +106,8 @@ export default function Orders() {
   function toggleExpand(id: string, order: any) {
     if (expanded === id) { setExpanded(null); return }
     setExpanded(id)
+    loadOnlineRiders()
     if (!items[id]) {
-      // fetch order items via the order's data (items not in list, we just show what we have)
-      // For now show a summary row
       setItems(prev => ({ ...prev, [id]: order._items || [] }))
     }
   }
@@ -146,30 +184,78 @@ export default function Orders() {
                     </tr>
                     {expanded === o.id && (
                       <tr key={`${o.id}-exp`} style={{ background:'#0d0d0d' }}>
-                        <td colSpan={9} style={{ padding:'12px 20px' }}>
-                          <div style={{ fontSize:12, color:'#666', marginBottom:6 }}>ORDER ID: {o.id}</div>
-                          <div style={{ display:'flex', gap:24 }}>
+                        <td colSpan={9} style={{ padding:'14px 20px' }}>
+                          <div style={{ fontSize:12, color:'#555', marginBottom:10 }}>ORDER ID: {o.id}</div>
+
+                          {/* Summary row */}
+                          <div style={{ display:'flex', gap:24, flexWrap:'wrap', marginBottom:16 }}>
                             <div>
-                              <span style={{ color:'#555', fontSize:11 }}>SHOP</span>
+                              <div style={{ color:'#555', fontSize:11, marginBottom:2 }}>SHOP</div>
                               <div style={{ color:'#ccc', fontWeight:600 }}>{o.shop_name}</div>
                             </div>
                             <div>
-                              <span style={{ color:'#555', fontSize:11 }}>CUSTOMER</span>
+                              <div style={{ color:'#555', fontSize:11, marginBottom:2 }}>CUSTOMER</div>
                               <div style={{ color:'#ccc', fontWeight:600 }}>{o.customer_phone}</div>
                             </div>
                             <div>
-                              <span style={{ color:'#555', fontSize:11 }}>RIDER</span>
-                              <div style={{ color:'#ccc', fontWeight:600 }}>{o.rider_name || 'Not assigned'}</div>
+                              <div style={{ color:'#555', fontSize:11, marginBottom:2 }}>RIDER</div>
+                              <div style={{ color: o.rider_name ? '#ccc' : '#444', fontWeight:600 }}>
+                                {o.rider_name || 'Not assigned'}
+                              </div>
                             </div>
                             <div>
-                              <span style={{ color:'#555', fontSize:11 }}>ORDER TOTAL</span>
+                              <div style={{ color:'#555', fontSize:11, marginBottom:2 }}>ORDER TOTAL</div>
                               <div style={{ color:'#22C55E', fontWeight:700 }}>{fmt(o.total_amount)}</div>
                             </div>
                             <div>
-                              <span style={{ color:'#555', fontSize:11 }}>DELIVERY FEE</span>
+                              <div style={{ color:'#555', fontSize:11, marginBottom:2 }}>DELIVERY FEE</div>
                               <div style={{ color:'#FBBF24', fontWeight:700 }}>{fmt(o.delivery_fee)}</div>
                             </div>
                           </div>
+
+                          {/* Assign rider panel — shown for assignable statuses */}
+                          {['pending','confirmed','assigned'].includes(o.status) && (
+                            <div style={{
+                              display:'flex', alignItems:'center', gap:10, flexWrap:'wrap',
+                              padding:'10px 14px', background:'#161616', borderRadius:10,
+                              border:'1px solid #2a2a2a',
+                            }}>
+                              <span style={{ fontSize:12, color:'#888', fontWeight:600, minWidth:90 }}>
+                                🛵 Assign Rider
+                              </span>
+                              <select
+                                value={selectedRider[o.id] ?? ''}
+                                onChange={e => setSelectedRider(prev => ({ ...prev, [o.id]: e.target.value }))}
+                                style={{ ...selectStyle, minWidth:200, fontSize:13 }}
+                              >
+                                <option value=''>
+                                  {onlineRiders.length === 0 ? '— No riders online —' : '— Pick a rider —'}
+                                </option>
+                                {onlineRiders.map(r => (
+                                  <option key={r.id} value={r.id}>
+                                    {r.name} · {r.phone} · {r.vehicle_type}
+                                  </option>
+                                ))}
+                              </select>
+                              <button
+                                onClick={() => handleAssign(o.id)}
+                                disabled={!selectedRider[o.id] || assigning === o.id}
+                                style={{
+                                  padding:'7px 18px', borderRadius:8, border:'none', fontWeight:700, fontSize:13,
+                                  background: selectedRider[o.id] && assigning !== o.id ? '#22C55E' : '#2a2a2a',
+                                  color: selectedRider[o.id] && assigning !== o.id ? '#000' : '#555',
+                                  cursor: selectedRider[o.id] && assigning !== o.id ? 'pointer' : 'not-allowed',
+                                }}
+                              >
+                                {assigning === o.id ? 'Assigning…' : 'Assign'}
+                              </button>
+                              {assignResult[o.id]?.msg && (
+                                <span style={{ fontSize:13, fontWeight:600, color: assignResult[o.id].ok ? '#22C55E' : '#EF4444' }}>
+                                  {assignResult[o.id].msg}
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </td>
                       </tr>
                     )}

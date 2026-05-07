@@ -17,35 +17,38 @@ const DEFAULT_DELIVERY_ADDRESS = {
 };
 
 export default function CartScreen({ navigation }: any) {
-  const { items, shopId, shopName, updateQty, removeItem, clearCart, total, itemCount } = useCart();
+  const { shops, grandTotal, itemCount, updateQty, removeItem, clearCart, clearShop } = useCart();
+  const shopBuckets = Object.values(shops);
+  // Legacy compat for rider-availability check (use first shop)
+  const firstShop = shopBuckets[0] ?? null;
   const [loading, setLoading]               = useState(false);
   const [tip, setTip]                       = useState(0);
   const [deliveryAddress, setDeliveryAddress] = useState(DEFAULT_DELIVERY_ADDRESS);
   const [ridersAvailable, setRidersAvailable] = useState<boolean | null>(null);
   const [availChecking, setAvailChecking]     = useState(false);
 
-  // Check rider availability whenever shopId changes or screen mounts
+  // Check rider availability for first shop
   const checkAvailability = useCallback(async () => {
-    if (!shopId) return;
+    if (!firstShop) return;
     setAvailChecking(true);
     try {
-      const res = await checkRiderAvailability(shopId);
+      const res = await checkRiderAvailability(firstShop.shopId);
       setRidersAvailable(res.data?.available ?? true);
     } catch {
-      setRidersAvailable(true); // fail open — don't block on network error
+      setRidersAvailable(true);
     } finally {
       setAvailChecking(false);
     }
-  }, [shopId]);
+  }, [firstShop?.shopId]);
 
   // ── Real-time availability via WebSocket ──────────────────────────────────
   // When any rider goes online or offline the server broadcasts rider_online /
   // rider_offline. We re-check immediately so the button state is instant.
   // A 60s fallback poll covers the case where the socket is disconnected.
   useEffect(() => {
-    if (!shopId) return;
+    if (!firstShop) return;
 
-    checkAvailability(); // immediate check on mount
+    checkAvailability();
 
     let ws: WebSocket | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -57,32 +60,25 @@ export default function CartScreen({ navigation }: any) {
       ws.onmessage = (e) => {
         try {
           const event = JSON.parse(e.data);
-          if (event.type === 'rider_online' || event.type === 'rider_offline') {
-            checkAvailability(); // re-check instantly on any rider status change
-          }
+          if (event.type === 'rider_online' || event.type === 'rider_offline') checkAvailability();
         } catch {}
       };
-      ws.onclose = () => {
-        if (!destroyed) reconnectTimer = setTimeout(connect, 3000);
-      };
+      ws.onclose = () => { if (!destroyed) reconnectTimer = setTimeout(connect, 3000); };
       ws.onerror = () => ws?.close();
     };
-
     connect();
 
-    // Fallback poll every 60s — catches edge cases where WS message was missed
     const fallback = setInterval(checkAvailability, 60000);
-
     return () => {
       destroyed = true;
       if (reconnectTimer) clearTimeout(reconnectTimer);
       ws?.close();
       clearInterval(fallback);
     };
-  }, [shopId, checkAvailability]);
+  }, [firstShop?.shopId, checkAvailability]);
 
-  const deliveryFee = total >= 500 ? 0 : total >= 200 ? 25 : 40;
-  const grandTotal  = total + deliveryFee + tip;
+  const deliveryFee   = grandTotal >= 500 ? 0 : grandTotal >= 200 ? 25 : 40;
+  const orderTotal    = grandTotal + deliveryFee + tip;
 
   const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -103,17 +99,15 @@ export default function CartScreen({ navigation }: any) {
   };
 
   const handlePlaceOrder = async () => {
-    if (!shopId) return;
-
-    // Hard block — no riders available
+    if (!firstShop) return;
     if (ridersAvailable === false) return;
 
-    // Guard: make sure all product IDs are real UUIDs (not leftover mock IDs like "g1", "g2")
-    const badItems = items.filter(i => !UUID_RE.test(i.product_id));
-    if (badItems.length > 0) {
+    // Guard: make sure all product IDs are real UUIDs
+    const allBadItems = shopBuckets.flatMap(b => b.items).filter(i => !UUID_RE.test(i.product_id));
+    if (allBadItems.length > 0) {
       Alert.alert(
         'Stale Cart Items',
-        `Some items (${badItems.map(i => i.name).join(', ')}) are from old demo data and can't be ordered. Please clear your cart and add fresh items from the shop.`,
+        `Some items (${allBadItems.map(i => i.name).join(', ')}) can't be ordered. Please clear your cart.`,
         [
           { text: 'Clear Cart', style: 'destructive', onPress: clearCart },
           { text: 'Cancel', style: 'cancel' },
@@ -123,16 +117,19 @@ export default function CartScreen({ navigation }: any) {
     }
 
     setLoading(true);
+    let lastOrderId: string | null = null;
     try {
-      const res = await placeOrder({
-        shop_id: shopId,
-        items: items.map(i => ({ shop_product_id: i.product_id, quantity: i.quantity })),
-        delivery_address: deliveryAddress,
-      });
-      const orderId = res.data?.order?.id || res.data?.order_id || res.data?.id;
-      if (!orderId) throw new Error('No order ID returned from server');
+      // Place one order per shop bucket sequentially
+      for (const bucket of shopBuckets) {
+        const res = await placeOrder({
+          shop_id: bucket.shopId,
+          items: bucket.items.map(i => ({ shop_product_id: i.product_id, quantity: i.quantity })),
+          delivery_address: deliveryAddress,
+        });
+        const orderId = res.data?.order?.id || res.data?.order_id || res.data?.id;
+        if (orderId) lastOrderId = orderId;
+      }
       clearCart();
-      // Navigate to Orders tab so tracking shows under the right tab
       navigation.reset({
         index: 0,
         routes: [{
@@ -140,9 +137,9 @@ export default function CartScreen({ navigation }: any) {
           state: {
             routes: [
               { name: 'OrdersList' },
-              { name: 'OrderTracking', params: { orderId, status: 'pending' } },
+              ...(lastOrderId ? [{ name: 'OrderTracking', params: { orderId: lastOrderId, status: 'pending' } }] : []),
             ],
-            index: 1,
+            index: lastOrderId ? 1 : 0,
           },
         }],
       });
@@ -161,7 +158,7 @@ export default function CartScreen({ navigation }: any) {
     ]);
   };
 
-  if (items.length === 0) {
+  if (shopBuckets.length === 0) {
     return (
       <View style={s.root}>
         <LinearGradient colors={['#FF8A00','#FF5C00']} style={s.header}>
@@ -197,7 +194,9 @@ export default function CartScreen({ navigation }: any) {
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={s.headerTitle}>Your Cart</Text>
-          <Text style={s.headerSub}>{itemCount} items · {shopName}</Text>
+          <Text style={s.headerSub}>
+            {itemCount} items · {shopBuckets.length > 1 ? `${shopBuckets.length} shops` : (firstShop?.shopName ?? '')}
+          </Text>
         </View>
         <TouchableOpacity style={s.clearBtn} onPress={confirmClear}>
           <Text style={s.clearTxt}>Clear</Text>
@@ -206,48 +205,56 @@ export default function CartScreen({ navigation }: any) {
 
       <ScrollView showsVerticalScrollIndicator={false}>
 
-        {/* Shop banner */}
-        <View style={s.shopBanner}>
-          <View style={s.shopBannerIcon}>
-            <Text style={{ fontSize: 22 }}>🏪</Text>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={s.shopBannerName}>{shopName}</Text>
-            <Text style={s.shopBannerSub}>Items from this shop</Text>
-          </View>
-          <TouchableOpacity onPress={() => navigation.goBack()}>
-            <Text style={s.addMoreTxt}>+ Add more</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Items */}
-        <View style={s.itemsCard}>
-          {items.map((item, idx) => (
-            <View key={item.product_id}>
-              <View style={s.itemRow}>
-                <View style={s.itemLeft}>
-                  <Text style={s.itemName}>{item.name}</Text>
-                  <Text style={s.itemPricePer}>₹{item.price} each</Text>
-                </View>
-                <View style={s.itemRight}>
-                  <View style={s.counter}>
-                    <TouchableOpacity style={s.cBtn}
-                      onPress={() => updateQty(item.product_id, item.quantity - 1)}>
-                      <Ionicons name={item.quantity === 1 ? 'trash-outline' : 'remove'} size={14} color="#FF8A00" />
-                    </TouchableOpacity>
-                    <Text style={s.cNum}>{item.quantity}</Text>
-                    <TouchableOpacity style={s.cBtn}
-                      onPress={() => updateQty(item.product_id, item.quantity + 1)}>
-                      <Ionicons name="add" size={14} color="#FF8A00" />
-                    </TouchableOpacity>
-                  </View>
-                  <Text style={s.itemTotal}>₹{item.price * item.quantity}</Text>
-                </View>
+        {/* Shop buckets — one section per shop */}
+        {shopBuckets.map((bucket) => (
+          <View key={bucket.shopId}>
+            <View style={s.shopBanner}>
+              <View style={s.shopBannerIcon}>
+                <Text style={{ fontSize: 22 }}>🏪</Text>
               </View>
-              {idx < items.length - 1 && <View style={s.itemDivider} />}
+              <View style={{ flex: 1 }}>
+                <Text style={s.shopBannerName}>{bucket.shopName}</Text>
+                <Text style={s.shopBannerSub}>{bucket.items.length} item{bucket.items.length !== 1 ? 's' : ''}</Text>
+              </View>
+              <TouchableOpacity onPress={() => {
+                Alert.alert('Remove shop?', `Remove all items from ${bucket.shopName}?`, [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Remove', style: 'destructive', onPress: () => clearShop(bucket.shopId) },
+                ]);
+              }}>
+                <Text style={[s.addMoreTxt, { color: '#EF4444' }]}>Remove</Text>
+              </TouchableOpacity>
             </View>
-          ))}
-        </View>
+
+            <View style={s.itemsCard}>
+              {bucket.items.map((item, idx) => (
+                <View key={item.product_id}>
+                  <View style={s.itemRow}>
+                    <View style={s.itemLeft}>
+                      <Text style={s.itemName}>{item.name}</Text>
+                      <Text style={s.itemPricePer}>₹{item.price} each</Text>
+                    </View>
+                    <View style={s.itemRight}>
+                      <View style={s.counter}>
+                        <TouchableOpacity style={s.cBtn}
+                          onPress={() => updateQty(item.product_id, bucket.shopId, item.quantity - 1)}>
+                          <Ionicons name={item.quantity === 1 ? 'trash-outline' : 'remove'} size={14} color="#FF8A00" />
+                        </TouchableOpacity>
+                        <Text style={s.cNum}>{item.quantity}</Text>
+                        <TouchableOpacity style={s.cBtn}
+                          onPress={() => updateQty(item.product_id, bucket.shopId, item.quantity + 1)}>
+                          <Ionicons name="add" size={14} color="#FF8A00" />
+                        </TouchableOpacity>
+                      </View>
+                      <Text style={s.itemTotal}>₹{item.price * item.quantity}</Text>
+                    </View>
+                  </View>
+                  {idx < bucket.items.length - 1 && <View style={s.itemDivider} />}
+                </View>
+              ))}
+            </View>
+          </View>
+        ))}
 
         {/* Delivery address */}
         <View style={s.addressCard}>
@@ -290,14 +297,14 @@ export default function CartScreen({ navigation }: any) {
           <Text style={s.billTitle}>Bill Details</Text>
           <View style={s.billRow}>
             <Text style={s.billLbl}>Item total</Text>
-            <Text style={s.billVal}>₹{total}</Text>
+            <Text style={s.billVal}>₹{grandTotal}</Text>
           </View>
           <View style={s.billRow}>
             <View>
               <Text style={s.billLbl}>Delivery fee</Text>
               {deliveryFee > 0 && (
                 <Text style={s.billHint}>
-                  Add ₹{total >= 200 ? 500 - total : 200 - total} more for free delivery
+                  Add ₹{grandTotal >= 200 ? 500 - grandTotal : 200 - grandTotal} more for free delivery
                 </Text>
               )}
             </View>
@@ -315,7 +322,7 @@ export default function CartScreen({ navigation }: any) {
           <View style={s.billDivider} />
           <View style={s.billRow}>
             <Text style={s.billTotal}>Grand Total</Text>
-            <Text style={s.billTotalVal}>₹{grandTotal}</Text>
+            <Text style={s.billTotalVal}>₹{orderTotal}</Text>
           </View>
         </View>
 
@@ -351,7 +358,7 @@ export default function CartScreen({ navigation }: any) {
       <View style={s.footer}>
         <View>
           <Text style={s.footerLbl}>To Pay</Text>
-          <Text style={s.footerTotal}>₹{grandTotal}</Text>
+          <Text style={s.footerTotal}>₹{orderTotal}</Text>
         </View>
         <TouchableOpacity
           onPress={handlePlaceOrder}
@@ -367,7 +374,9 @@ export default function CartScreen({ navigation }: any) {
               : ridersAvailable === false
               ? <Text style={s.placeBtnTxt}>No Riders Available</Text>
               : <>
-                  <Text style={s.placeBtnTxt}>Place Order</Text>
+                  <Text style={s.placeBtnTxt}>
+                    {shopBuckets.length > 1 ? `Place ${shopBuckets.length} Orders` : 'Place Order'}
+                  </Text>
                   <Ionicons name="arrow-forward" size={18} color="#fff" />
                 </>
             }

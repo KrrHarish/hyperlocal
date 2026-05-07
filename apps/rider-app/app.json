@@ -15,7 +15,8 @@
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Zuqu Rider needs your location to find nearby orders.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Zuqu Rider needs your location to assign you nearby orders.",
-        "NSLocationAlwaysUsageDescription": "Zuqu Rider needs your background location to track deliveries."
+        "NSLocationAlwaysUsageDescription": "Zuqu Rider needs your background location to track deliveries.",
+        "UIBackgroundModes": ["audio"]
       }
     },
     "android": {
@@ -27,11 +28,21 @@
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
-        "ACCESS_BACKGROUND_LOCATION"
+        "ACCESS_BACKGROUND_LOCATION",
+        "MODIFY_AUDIO_SETTINGS",
+        "POST_NOTIFICATIONS",
+        "VIBRATE"
       ]
     },
     "plugins": [
       "expo-splash-screen",
+      "expo-av",
+      [
+        "expo-notifications",
+        {
+          "sounds": ["./assets/new_order.wav"]
+        }
+      ],
       [
         "expo-location",
         {

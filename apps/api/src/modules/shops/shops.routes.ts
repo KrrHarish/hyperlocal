@@ -1,5 +1,5 @@
 import { FastifyInstance } from 'fastify'
-import { createShop, getShopsByOwner, getNearbyShops } from './shops.service'
+import { createShop, getShopsByOwner, getNearbyShops, getLateNightShops } from './shops.service'
 import { db } from '../../shared/db/knex'
 
 export async function shopRoutes(server: FastifyInstance) {
@@ -13,21 +13,23 @@ export async function shopRoutes(server: FastifyInstance) {
     }
   }
 
-  // GET /shops/nearby?lat=12.97&lng=77.59&radius=2 — PUBLIC (no auth)
+  // GET /shops/nearby?lat=&lng=&radius=&type=home_producer&open_now=true — PUBLIC
   server.get('/shops/nearby', async (request, reply) => {
-    const { lat, lng, radius } = request.query as {
-      lat: string; lng: string; radius?: string
+    const { lat, lng, radius, type, open_now } = request.query as {
+      lat: string; lng: string; radius?: string; type?: string; open_now?: string
     }
-
-    if (!lat || !lng) {
-      return reply.status(400).send({ error: 'lat and lng are required' })
-    }
-
+    if (!lat || !lng) return reply.status(400).send({ error: 'lat and lng are required' })
     const shops = await getNearbyShops(
-      parseFloat(lat),
-      parseFloat(lng),
-      radius ? parseFloat(radius) : 2
+      parseFloat(lat), parseFloat(lng),
+      radius ? parseFloat(radius) : 2,
+      { type, open_now: open_now === 'true' }
     )
+    return reply.send({ shops })
+  })
+
+  // GET /shops/late-night — shops open late or 24h — PUBLIC
+  server.get('/shops/late-night', async (_request, reply) => {
+    const shops = await getLateNightShops()
     return reply.send({ shops })
   })
 

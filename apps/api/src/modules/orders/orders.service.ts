@@ -101,6 +101,21 @@ export async function placeOrder(customerId: string, data: {
     }
   }
 
+  // Auto-apply best shop deal if no promo code used
+  let dealId: string | null = null
+  let dealTitle: string | null = null
+  if (!discountAmount) {
+    try {
+      const { applyBestDeal } = await import('../deals/deals.routes')
+      const dealResult = await applyBestDeal(data.shop_id, subtotal)
+      if (dealResult.discount > 0) {
+        discountAmount = dealResult.discount
+        dealId        = dealResult.dealId
+        dealTitle     = dealResult.dealTitle
+      }
+    } catch {}
+  }
+
   const totalAmount = Math.max(0, subtotal + deliveryFee - discountAmount)
 
   // Get shop commission rate
@@ -122,7 +137,14 @@ export async function placeOrder(customerId: string, data: {
       delivery_otp: deliveryOtp,
       payment_status: 'paid', // prototype: assume paid
       status: 'pending',
+      ...(dealId && { deal_id: dealId, discount_source: 'deal' }),
+      ...(data.promo_code && !dealId && { discount_source: 'promo_code' }),
     }).returning('*')
+
+    // Increment deal usage
+    if (dealId) {
+      await trx('shop_deals').where({ id: dealId }).increment('uses_count', 1)
+    }
 
     await trx('order_items').insert(
       orderItems.map(item => ({ ...item, order_id: newOrder.id }))

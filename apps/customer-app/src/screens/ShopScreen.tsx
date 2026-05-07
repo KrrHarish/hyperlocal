@@ -6,7 +6,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useCart } from '../store/CartContext';
-import { getShopProducts, getShopById, IMAGE_BASE } from '../services/api';
+import { getShopProducts, getShopById, getShopDeals, IMAGE_BASE } from '../services/api';
 
 // ── Category emoji + colour map ─────────────────────────────────
 const CAT_META: Record<string, { emoji: string; color: string }> = {
@@ -67,8 +67,9 @@ export default function ShopScreen({ route, navigation }: any) {
   // Accept either a full shop object OR just a shopId (e.g. from Reorder)
   const { shop: initialShop, shopId: passedShopId } = route.params || {};
   const [shop, setShop]           = useState<any>(initialShop || null);
-  const { addItem, updateQty, items, itemCount, total } = useCart();
+  const { addItem, updateQty, getShopItems, itemCount } = useCart();
   const [products, setProducts]   = useState<any[]>([]);
+  const [deals,    setDeals]      = useState<any[]>([]);
   const [loading, setLoading]     = useState(true);
   const [search, setSearch]       = useState('');
   const [activeTab, setActiveTab] = useState('All');
@@ -109,21 +110,25 @@ export default function ShopScreen({ route, navigation }: any) {
     (async () => {
       setLoading(true);
       try {
-        const res = await getShopProducts(shop.id);
-        const list = res.data?.products || res.data || [];
-        if (Array.isArray(list) && list.length > 0) {
-          setProducts(list.map((p: any) => ({
-            id:       p.id,
-            name:     p.name,
-            brand:    p.brand || '',
-            price:    parseFloat(p.price || p.selling_price || '0'),
-            category: (p.category || 'general').toLowerCase(),
-            unit:     p.unit || '',
-            in_stock: p.stock_status !== 'out_of_stock',
+        const [prodRes, dealsRes] = await Promise.allSettled([
+          getShopProducts(shop.id),
+          getShopDeals(shop.id),
+        ]);
+        if (prodRes.status === 'fulfilled') {
+          const list = prodRes.value.data?.products || prodRes.value.data || [];
+          setProducts(Array.isArray(list) ? list.map((p: any) => ({
+            id:           p.id,
+            name:         p.name,
+            brand:        p.brand || '',
+            price:        parseFloat(p.price || p.selling_price || '0'),
+            category:     (p.category || 'general').toLowerCase(),
+            unit:         p.unit || '',
+            in_stock:     p.stock_status !== 'out_of_stock',
             stock_status: p.stock_status || 'in_stock',
-          })));
-        } else {
-          setProducts([]);
+          })) : []);
+        }
+        if (dealsRes.status === 'fulfilled') {
+          setDeals(dealsRes.value.data?.deals ?? []);
         }
       } catch {
         setProducts([]);
@@ -133,7 +138,7 @@ export default function ShopScreen({ route, navigation }: any) {
     })();
   }, [shop?.id]);
 
-  const getQty = (pid: string) => items.find(i => i.product_id === pid)?.quantity || 0;
+  const getQty = (pid: string) => (shop ? getShopItems(shop.id) : []).find(i => i.product_id === pid)?.quantity || 0;
 
   const rawCategories = Array.from(new Set(products.map(p => p.category)));
   const categories    = ['All', ...rawCategories];
@@ -161,7 +166,9 @@ export default function ShopScreen({ route, navigation }: any) {
   }
 
   const shopClosed   = !shop.is_open;
-  const deliveryFee  = total >= 200 ? 0 : 40;
+  const shopItems    = getShopItems(shop.id);
+  const shopTotal    = shopItems.reduce((s, i) => s + i.price * i.quantity, 0);
+  const deliveryFee  = shopTotal >= 200 ? 0 : 40;
   const deliveryTime = shop.eta || '15–20 min';
   const rating       = shop.rating || 4.5;
   const distance     = shop.distance || '—';
@@ -297,6 +304,30 @@ export default function ShopScreen({ route, navigation }: any) {
         </View>
       )}
 
+      {/* ── DEALS STRIP ── */}
+      {deals.length > 0 && (
+        <View style={s.dealsStrip}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}
+            contentContainerStyle={s.dealsScroll}>
+            {deals.map(deal => {
+              const label = deal.deal_type === 'percent'
+                ? `${deal.deal_value}% OFF`
+                : `₹${deal.deal_value} OFF`;
+              const minTxt = deal.min_order > 0 ? ` on ₹${deal.min_order}+` : '';
+              return (
+                <View key={deal.id} style={s.dealChip}>
+                  <Text style={s.dealChipIcon}>🏷️</Text>
+                  <View>
+                    <Text style={s.dealChipLabel}>{label}{minTxt}</Text>
+                    <Text style={s.dealChipTitle} numberOfLines={1}>{deal.title}</Text>
+                  </View>
+                </View>
+              );
+            })}
+          </ScrollView>
+        </View>
+      )}
+
       {/* ── CATEGORY TABS ── */}
       <View style={s.tabBar}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.tabContent}>
@@ -352,7 +383,7 @@ export default function ShopScreen({ route, navigation }: any) {
                     key={p.id}
                     style={[s.pCard, !p.in_stock && s.pCardFaded]}
                     activeOpacity={0.85}
-                    onPress={() => navigation.navigate('ProductDetail', { product: { ...p, emoji }, shop })}
+                    onPress={() => navigation.navigate('ProductDetail', { product: { ...p, emoji }, shop, deals })}
                   >
                     {/* Product image */}
                     <View style={[s.pImg, { backgroundColor: bg }]}>
@@ -371,7 +402,14 @@ export default function ShopScreen({ route, navigation }: any) {
                         <Text style={s.pBrand}>{p.brand}</Text>
                       ) : null}
                       <Text style={s.pUnit}>{p.unit || '1 pc'}</Text>
+                      <View style={s.priceRow}>
                       <Text style={s.pPrice}>₹{p.price}</Text>
+                      {deals.length > 0 && (
+                        <View style={s.dealTag}>
+                          <Text style={s.dealTagTxt}>🏷️ Deal</Text>
+                        </View>
+                      )}
+                    </View>
                     </View>
 
                     {/* Add / counter */}
@@ -397,7 +435,7 @@ export default function ShopScreen({ route, navigation }: any) {
                         </TouchableOpacity>
                       ) : (
                         <View style={s.counter}>
-                          <TouchableOpacity style={s.cBtn} onPress={() => updateQty(p.id, qty - 1)}>
+                          <TouchableOpacity style={s.cBtn} onPress={() => updateQty(p.id, shop.id, qty - 1)}>
                             <Ionicons name={qty === 1 ? 'trash-outline' : 'remove'} size={15} color="#fff" />
                           </TouchableOpacity>
                           <Text style={s.cNum}>{qty}</Text>
@@ -420,6 +458,15 @@ export default function ShopScreen({ route, navigation }: any) {
         </ScrollView>
       )}
 
+      {/* ── CHAT FAB ── */}
+      <TouchableOpacity
+        style={s.chatFab}
+        onPress={() => navigation.navigate('Chat', { shopId: shop.id, shopName: shop.name })}
+        activeOpacity={0.85}
+      >
+        <Ionicons name="chatbubble-ellipses" size={22} color="#fff" />
+      </TouchableOpacity>
+
       {/* ── VIEW CART BAR ── */}
       {itemCount > 0 && !shopClosed && (
         <TouchableOpacity
@@ -439,7 +486,7 @@ export default function ShopScreen({ route, navigation }: any) {
               </View>
             </View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-              <Text style={s.cartTotal}>₹{total}</Text>
+              <Text style={s.cartTotal}>₹{shopTotal}</Text>
               <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.8)" />
             </View>
           </LinearGradient>
@@ -546,11 +593,30 @@ const s = StyleSheet.create({
   lowBadge:      { position: 'absolute', bottom: 4, right: 4, backgroundColor: '#FEF3C7',
                     borderRadius: 4, paddingHorizontal: 4, paddingVertical: 1 },
   lowTxt:        { fontSize: 9, fontWeight: '800', color: '#D97706' },
+  // Deals strip
+  dealsStrip:    { backgroundColor: '#FFF8ED', borderBottomWidth: 1, borderBottomColor: '#FFE8B8' },
+  dealsScroll:   { paddingHorizontal: 14, paddingVertical: 10, gap: 10 },
+  dealChip:      { flexDirection: 'row', alignItems: 'center', gap: 8,
+                    backgroundColor: '#FFF', borderRadius: 12,
+                    paddingHorizontal: 12, paddingVertical: 8,
+                    borderWidth: 1, borderColor: '#FFD98E',
+                    shadowColor: '#FF8A00', shadowOpacity: 0.08,
+                    shadowRadius: 4, shadowOffset: { width: 0, height: 1 } },
+  dealChipIcon:  { fontSize: 18 },
+  dealChipLabel: { fontSize: 13, fontWeight: '800', color: '#B45309' },
+  dealChipTitle: { fontSize: 11, color: '#92400E', maxWidth: 160 },
+
+  // Product price row
+  priceRow:      { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap' },
+  dealTag:       { backgroundColor: '#FEF3C7', borderRadius: 6,
+                    paddingHorizontal: 6, paddingVertical: 2 },
+  dealTagTxt:    { fontSize: 10, fontWeight: '700', color: '#92400E' },
+
   pInfo:         { flex: 1, gap: 2 },
   pName:         { fontSize: 14, fontWeight: '700', color: '#111', lineHeight: 19 },
   pBrand:        { fontSize: 11, color: '#FF8A00', fontWeight: '600' },
   pUnit:         { fontSize: 11, color: '#999' },
-  pPrice:        { fontSize: 16, fontWeight: '800', color: '#111', marginTop: 4 },
+  pPrice:        { fontSize: 16, fontWeight: '800', color: '#111' },
   pAction:       { alignItems: 'center', flexShrink: 0 },
 
   outBtn:        { width: 72, borderRadius: 10, paddingVertical: 8,
@@ -565,6 +631,13 @@ const s = StyleSheet.create({
                     borderRadius: 12, overflow: 'hidden', backgroundColor: '#FF8A00', width: 96 },
   cBtn:          { width: 30, height: 36, alignItems: 'center', justifyContent: 'center' },
   cNum:          { flex: 1, color: '#fff', fontSize: 14, fontWeight: '800', textAlign: 'center' },
+
+  // Chat FAB
+  chatFab:       { position: 'absolute', bottom: 100, right: 16, width: 52, height: 52,
+                    borderRadius: 26, backgroundColor: '#7C3AED',
+                    alignItems: 'center', justifyContent: 'center',
+                    shadowColor: '#7C3AED', shadowOpacity: 0.5, shadowRadius: 12,
+                    shadowOffset: { width: 0, height: 4 }, elevation: 8 },
 
   // Cart bar
   cartBar:       { position: 'absolute', bottom: 20, left: 16, right: 16,

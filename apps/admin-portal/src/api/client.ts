@@ -69,5 +69,15 @@ export const uploadShopImage   = (id: string, file: File)                       
   return api.post(`/admin/shops/${id}/image`, form, { headers: { 'Content-Type': 'multipart/form-data' } })
 }
 
+// ── Order actions ─────────────────────────────────────────────────────────────
+export const getOnlineRiders  = ()                                   => api.get('/admin/riders/online')
+export const assignOrderRider = (orderId: string, riderId: string)   => api.post(`/admin/orders/${orderId}/assign`, { rider_id: riderId })
+
+// ── Platform Offers ───────────────────────────────────────────────────────────
+export const getPlatformOffers    = ()                      => api.get('/admin/platform-offers')
+export const createPlatformOffer  = (data: any)             => api.post('/admin/platform-offers', data)
+export const updatePlatformOffer  = (id: string, data: any) => api.patch(`/admin/platform-offers/${id}`, data)
+export const deletePlatformOffer  = (id: string)            => api.delete(`/admin/platform-offers/${id}`)
+
 // ── CSV exports ───────────────────────────────────────────────────────────────
 export const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api'

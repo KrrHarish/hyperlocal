@@ -121,4 +121,52 @@ export const deleteAddress = (id: string) =>
 export const setDefaultAddress = (id: string) =>
   api.patch(`/addresses/${id}/default`);
 
+// ── DEALS ─────────────────────────────────────────────
+export const getActiveDeals = (lat: number, lng: number) =>
+  api.get('/deals/active', { params: { lat, lng } });
+
+export const getShopDeals = (shopId: string) =>
+  api.get(`/shops/${shopId}/deals`);
+
+// ── FEED ──────────────────────────────────────────────
+export const getNeighbourhoodFeed = (lat: number, lng: number) =>
+  api.get('/feed', { params: { lat, lng } });
+
+// ── CHAT ──────────────────────────────────────────────
+export const getChatMessages = (shopId: string) =>
+  api.get(`/shops/${shopId}/chat`);
+
+export const sendChatMessage = (shopId: string, body: string) =>
+  api.post(`/shops/${shopId}/chat`, { body });
+
+// ── SUBSCRIPTIONS ─────────────────────────────────────
+export const getSubscriptions = () =>
+  api.get('/subscriptions');
+
+export const createSubscription = (payload: {
+  shop_id: string;
+  items: { shop_product_id: string; product_name: string; quantity: number; unit_price: number }[];
+  delivery_address: { line1: string; city: string; pincode: string; lat: number; lng: number };
+  frequency: 'daily' | 'weekly' | 'biweekly' | 'monthly';
+  day_of_week?: number;
+  label?: string;
+}) => api.post('/subscriptions', payload);
+
+export const updateSubscription = (id: string, payload: Partial<{ is_active: boolean; frequency: string; day_of_week: number; label: string }>) =>
+  api.patch(`/subscriptions/${id}`, payload);
+
+export const deleteSubscription = (id: string) =>
+  api.delete(`/subscriptions/${id}`);
+
+// ── LATE NIGHT SHOPS ──────────────────────────────────
+export const getLateNightShops = () =>
+  api.get('/shops/late-night');
+
+// ── HOME PRODUCERS ────────────────────────────────────
+export const getHomeProducers = (lat: number, lng: number) =>
+  api.get('/shops/nearby', { params: { lat, lng, type: 'home_producer' } });
+
+// ── PLATFORM OFFERS ───────────────────────────────────
+export const getPlatformOffers = () => api.get('/platform-offers');
+
 export default api;

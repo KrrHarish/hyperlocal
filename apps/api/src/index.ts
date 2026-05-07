@@ -15,6 +15,11 @@ import { adminRoutes } from './modules/admin/admin.routes'
 import { ratingsRoutes } from './modules/ratings/ratings.routes'
 import { addressRoutes } from './modules/addresses/addresses.routes'
 import { promosRoutes } from './modules/promos/promos.routes'
+import { dealsRoutes } from './modules/deals/deals.routes'
+import { feedRoutes } from './modules/feed/feed.routes'
+import { chatRoutes } from './modules/chat/chat.routes'
+import { subscriptionsRoutes } from './modules/subscriptions/subscriptions.routes'
+import { startSubscriptionCron } from './modules/subscriptions/subscriptions.cron'
 
 dotenv.config()
 
@@ -51,7 +56,11 @@ server.register(cancelOrder,    { prefix: '/api' })
 server.register(adminRoutes,    { prefix: '/api' })
 server.register(ratingsRoutes,  { prefix: '/api' })
 server.register(addressRoutes,  { prefix: '/api' })
-server.register(promosRoutes,   { prefix: '/api' })
+server.register(promosRoutes,        { prefix: '/api' })
+server.register(dealsRoutes,         { prefix: '/api' })
+server.register(feedRoutes,          { prefix: '/api' })
+server.register(chatRoutes,          { prefix: '/api' })
+server.register(subscriptionsRoutes, { prefix: '/api' })
 
 // Health check
 server.get('/health', async () => {
@@ -79,6 +88,7 @@ const start = async () => {
     console.log('Server running on http://localhost:3000')
     // Attach WebSocket server to the same HTTP server
     initWebSocket(server.server)
+    startSubscriptionCron()
   } catch (err) {
     server.log.error(err)
     process.exit(1)

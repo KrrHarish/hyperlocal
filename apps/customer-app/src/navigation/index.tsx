@@ -19,6 +19,7 @@ import ProfileScreen       from '../screens/ProfileScreen';
 import ProductDetailScreen from '../screens/ProductDetailScreen';
 import SearchScreen        from '../screens/SearchScreen';
 import AddressesScreen     from '../screens/AddressesScreen';
+import ChatScreen          from '../screens/ChatScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab   = createBottomTabNavigator();
@@ -49,6 +50,7 @@ function HomeStack() {
       <Stack.Screen name="ProductDetail"  component={ProductDetailScreen} />
       <Stack.Screen name="Search"        component={SearchScreen} />
       <Stack.Screen name="Addresses"     component={AddressesScreen} />
+      <Stack.Screen name="Chat"          component={ChatScreen} />
     </Stack.Navigator>
   );
 }

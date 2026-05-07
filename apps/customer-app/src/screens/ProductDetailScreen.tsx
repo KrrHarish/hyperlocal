@@ -57,8 +57,8 @@ const SIMILAR = [
 ];
 
 export default function ProductDetailScreen({ route, navigation }: any) {
-  const { product: passedProduct, shop: passedShop } = route.params || {};
-  const { addItem, updateQty, items } = useCart();
+  const { product: passedProduct, shop: passedShop, deals: shopDeals = [] } = route.params || {};
+  const { addItem, updateQty, getShopItems } = useCart();
   const [activeTab, setActiveTab] = useState<'details'|'nutrition'>('details');
   const [liveProduct, setLiveProduct] = useState<any>(passedProduct);
 
@@ -82,7 +82,7 @@ export default function ProductDetailScreen({ route, navigation }: any) {
     if (event.productId === passedProduct?.id) fetchLive();
   }, [passedProduct?.id, fetchLive]));
 
-  const qty    = items.find(i => i.product_id === product?.id)?.quantity || 0;
+  const qty    = getShopItems(shop?.id ?? '').find(i => i.product_id === product?.id)?.quantity || 0;
   const emoji  = product?.emoji || getProductEmoji(product?.name, product?.category);
   const isOos  = product?.stock_status === 'out_of_stock';
   const isLow  = product?.stock_status === 'low' || product?.stock_status === 'low_stock';
@@ -100,7 +100,7 @@ export default function ProductDetailScreen({ route, navigation }: any) {
   };
 
   const handleInc = () => handleAdd();
-  const handleDec = () => updateQty(product.id, qty - 1);
+  const handleDec = () => updateQty(product.id, shop.id, qty - 1);
 
   if (!product) {
     return (
@@ -171,6 +171,32 @@ export default function ProductDetailScreen({ route, navigation }: any) {
               : <Text style={s.inStockTxt}>✅ In Stock</Text>
             }
           </View>
+
+          {/* Active deals */}
+          {shopDeals.length > 0 && (
+            <View style={s.dealsBox}>
+              {shopDeals.map((deal: any) => {
+                const off = deal.deal_type === 'percent'
+                  ? `${deal.deal_value}% OFF`
+                  : `₹${deal.deal_value} OFF`;
+                const min = deal.min_order > 0 ? ` on orders above ₹${deal.min_order}` : '';
+                return (
+                  <View key={deal.id} style={s.dealRow}>
+                    <View style={s.dealIconWrap}>
+                      <Text style={{ fontSize: 14 }}>🏷️</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.dealOff}>{off}{min}</Text>
+                      <Text style={s.dealTitle}>{deal.title}</Text>
+                    </View>
+                    <View style={s.dealBadge}>
+                      <Text style={s.dealBadgeTxt}>AUTO</Text>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          )}
 
           {/* Add to cart */}
           <View style={s.cartRow}>
@@ -343,7 +369,7 @@ export default function ProductDetailScreen({ route, navigation }: any) {
         <View style={s.stickyBar}>
           <View>
             <Text style={s.stickyLbl}>Cart Total</Text>
-            <Text style={s.stickyTotal}>₹{items.reduce((t,i) => t + i.price * i.quantity, 0)}</Text>
+            <Text style={s.stickyTotal}>₹{getShopItems(shop?.id ?? '').reduce((t: number, i: any) => t + i.price * i.quantity, 0)}</Text>
           </View>
           <TouchableOpacity style={{ flex:1, borderRadius:14, overflow:'hidden', marginLeft:16 }}
             onPress={() => navigation.navigate('Cart')}>
@@ -388,6 +414,17 @@ const s = StyleSheet.create({
   ratingCount:    { fontSize:12, color:'#888' },
   dot:            { width:3, height:3, borderRadius:1.5, backgroundColor:'#DDD' },
   inStockTxt:     { fontSize:12, color:'#555', fontWeight:'500' },
+
+  dealsBox:       { backgroundColor: '#FFFBEB', borderRadius: 12, padding: 10,
+                     borderWidth: 1, borderColor: '#FDE68A', gap: 8, marginBottom: 14 },
+  dealRow:        { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  dealIconWrap:   { width: 32, height: 32, borderRadius: 8, backgroundColor: '#FEF3C7',
+                     alignItems: 'center', justifyContent: 'center' },
+  dealOff:        { fontSize: 13, fontWeight: '800', color: '#92400E' },
+  dealTitle:      { fontSize: 11, color: '#B45309', marginTop: 1 },
+  dealBadge:      { backgroundColor: '#D97706', borderRadius: 6,
+                     paddingHorizontal: 7, paddingVertical: 3 },
+  dealBadgeTxt:   { fontSize: 9, fontWeight: '900', color: '#fff', letterSpacing: 0.5 },
 
   cartRow:        { },
   addBtn:         { borderRadius:14, overflow:'hidden' },

@@ -27,12 +27,38 @@ export async function getShopsByOwner(ownerId: string) {
   return db('shops').where({ owner_id: ownerId })
 }
 
-export async function getNearbyShops(_lat: number, _lng: number, _radiusKm = 2) {
-  // Returns only active (non-suspended) shops.
-  // Closed shops (is_open=false) are included so customers can see them as "Closed".
-  // Suspended shops (is_active=false) are excluded entirely.
+export async function getNearbyShops(_lat: number, _lng: number, _radiusKm = 2, filters: {
+  type?: string
+  open_now?: boolean
+} = {}) {
+  let q = db('shops').where({ is_active: true })
+  if (filters.type)     q = q.where({ shop_type: filters.type })
+  if (filters.open_now) q = q.where({ is_open: true })
+  return q.select('*').orderBy('name', 'asc')
+}
+
+export async function getLateNightShops() {
   return db('shops')
-    .where({ is_active: true })
+    .where({ is_active: true, is_open: true })
+    .where(function() {
+      this.where({ late_night_tag: true }).orWhere({ is_24h: true })
+    })
     .select('*')
     .orderBy('name', 'asc')
+}
+
+export async function insertFeedEvent(shopId: string, eventType: string, title: string, body?: string, imageUrl?: string) {
+  const shop = await db('shops').where({ id: shopId }).select('lat', 'lng').first()
+  const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000) // 48h TTL
+  const [event] = await db('feed_events').insert({
+    shop_id:    shopId,
+    event_type: eventType,
+    title,
+    body:       body ?? null,
+    image_url:  imageUrl ?? null,
+    lat:        shop?.lat ?? null,
+    lng:        shop?.lng ?? null,
+    expires_at: expiresAt,
+  }).returning('*')
+  return event
 }

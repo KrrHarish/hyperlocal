@@ -9,7 +9,11 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import { getNearbyShops, getProductsByCategory, IMAGE_BASE } from '../services/api';
+import {
+  getNearbyShops, getProductsByCategory, IMAGE_BASE,
+  getActiveDeals, getNeighbourhoodFeed, getHomeProducers, getLateNightShops,
+  getPlatformOffers,
+} from '../services/api';
 import { useCart } from '../store/CartContext';
 import { useProductSocket } from '../hooks/useProductSocket';
 
@@ -40,12 +44,6 @@ const COLLECTIONS = [
   { id:'evening',   label:'Evening Snacks',        emoji:'🍿', count:18, color:'#F0FDF4' },
   { id:'cleaning',  label:'Cleaning Supplies',     emoji:'🧹', count:31, color:'#EFF6FF' },
   { id:'baby',      label:'Baby & Kids',            emoji:'👶', count:15, color:'#FDF4FF' },
-];
-
-const OFFERS = [
-  { id:1, title:'20% OFF',  sub:'On first Grocery order', code:'FIRST20', color:'#FF8A00' },
-  { id:2, title:'FREE',     sub:'Delivery above ₹199',    code:'AUTO',    color:'#22C55E' },
-  { id:3, title:'₹50 OFF',  sub:'On orders above ₹299',   code:'SAVE50',  color:'#8B5CF6' },
 ];
 
 // No mock shops or products — all data comes from the real API
@@ -96,10 +94,18 @@ export default function HomeScreen({ navigation }: any) {
   const [userLng, setUserLng]          = useState(77.6389);
   const [catProducts, setCatProducts]  = useState<any[]>([]);
   const [catLoading, setCatLoading]    = useState(false);
+  const [deals, setDeals]              = useState<any[]>([]);
+  const [feed, setFeed]                = useState<any[]>([]);
+  const [homeProducers, setHomeProducers] = useState<any[]>([]);
+  const [lateNightShops, setLateNightShops] = useState<any[]>([]);
+  const [platformOffers, setPlatformOffers] = useState<any[]>([]);
   const [bannerIdx, setBannerIdx]     = useState(0);
   const bannerRef = useRef<FlatList<typeof BANNERS[0]>>(null);
   const bannerTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const { addItem, items, updateQty, removeItem } = useCart();
+  const { addItem, shops: cartShops, getShopItems, updateQty, removeItem } = useCart();
+
+  const hr = new Date().getHours();
+  const showLateNight = hr >= 22 || hr < 6;
 
   // ── Auto-scroll banners
   useEffect(() => {
@@ -177,7 +183,23 @@ export default function HomeScreen({ navigation }: any) {
       );
     } catch { setShops([]); setLocationName('HSR Layout, Bengaluru'); }
     finally { setLoading(false); setRefreshing(false); }
-  }, []);
+
+    // Fetch supplemental sections (non-blocking — best effort)
+    try {
+      const [dealsRes, feedRes, prodRes, lateRes, offersRes] = await Promise.allSettled([
+        getActiveDeals(userLat, userLng),
+        getNeighbourhoodFeed(userLat, userLng),
+        getHomeProducers(userLat, userLng),
+        getLateNightShops(),
+        getPlatformOffers(),
+      ]);
+      if (dealsRes.status   === 'fulfilled') setDeals(dealsRes.value.data?.deals ?? []);
+      if (feedRes.status    === 'fulfilled') setFeed(feedRes.value.data?.events ?? []);
+      if (prodRes.status    === 'fulfilled') setHomeProducers(prodRes.value.data?.shops ?? []);
+      if (lateRes.status    === 'fulfilled') setLateNightShops(lateRes.value.data?.shops ?? []);
+      if (offersRes.status  === 'fulfilled') setPlatformOffers(offersRes.value.data?.offers ?? []);
+    } catch {}
+  }, [userLat, userLng]);
 
   useEffect(() => { fetchShops(); }, [fetchShops]);
 
@@ -203,20 +225,13 @@ export default function HomeScreen({ navigation }: any) {
     if (category !== 'all') fetchCatProducts(false);
   }, [category, fetchCatProducts]));
 
-  const getCartQty = (productId: string) =>
-    items.find(i => i.product_id === productId)?.quantity || 0;
-
-  const handleAddToCart = (p: any) => {
-    const currentQty = getCartQty(p.id);
-    if (currentQty === 0) {
-      addItem(
-        { product_id: p.id, name: p.name, price: p.price, quantity: 1 },
-        p.shop_id, p.shop_name
-      );
-    } else {
-      updateQty(p.id, currentQty + 1);
-    }
+  const getCartQty = (productId: string, shopId?: string) => {
+    if (shopId) return getShopItems(shopId).find(i => i.product_id === productId)?.quantity || 0;
+    return Object.values(cartShops).flatMap(b => b.items).find(i => i.product_id === productId)?.quantity || 0;
   };
+
+  const handleAddToCart = (p: any) =>
+    addItem({ product_id: p.id, name: p.name, price: p.price, quantity: 1 }, p.shop_id, p.shop_name);
 
   const filtered = shops.filter(s => {
     const matchSearch = !search || s.name.toLowerCase().includes(search.toLowerCase());
@@ -338,21 +353,126 @@ export default function HomeScreen({ navigation }: any) {
             </View>
           </View>
 
-          {/* ── OFFER STRIPS ── */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}
-            contentContainerStyle={s.offerContent} style={s.offerScroll}>
-            {OFFERS.map(o => (
-              <View key={o.id} style={[s.offerChip, { borderColor: o.color + '40', backgroundColor: o.color + '0D' }]}>
-                <Text style={[s.offerAmt, { color: o.color }]}>{o.title}</Text>
-                <Text style={s.offerSub}>{o.sub}</Text>
-                {o.code !== 'AUTO' && (
-                  <View style={[s.codeBox, { borderColor: o.color + '50' }]}>
-                    <Text style={[s.codeTxt, { color: o.color }]}>{o.code}</Text>
-                  </View>
-                )}
+          {/* ── LIVE DEALS STRIP (shop deals + platform offers combined) ── */}
+          {(deals.length > 0 || platformOffers.length > 0) && (
+            <View style={s.section}>
+              <View style={s.secRow}>
+                <Text style={s.secTitle}>🔥 Live Deals</Text>
+                <TouchableOpacity><Text style={s.secLink}>See all</Text></TouchableOpacity>
               </View>
-            ))}
-          </ScrollView>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ gap: 12, paddingRight: 4, paddingBottom: 4 }}>
+
+                {/* Platform offer cards */}
+                {platformOffers.map((o: any) => {
+                  const colorMap: Record<string,[string,string]> = {
+                    orange: ['#FF8A00', '#FF4500'],
+                    green:  ['#16A34A', '#14532D'],
+                    purple: ['#7C3AED', '#5B21B6'],
+                    blue:   ['#2563EB', '#1E3A8A'],
+                  };
+                  const colors: [string,string] = colorMap[o.color] ?? ['#FF8A00', '#FF4500'];
+                  const offLabel =
+                    o.offer_type === 'free_delivery' ? 'FREE'
+                    : o.offer_type === 'percent_off'  ? `${Math.round(o.value)}%`
+                    : `₹${Math.round(o.value)}`;
+                  const offSuffix =
+                    o.offer_type === 'free_delivery' ? 'DELIVERY'
+                    : 'OFF';
+                  return (
+                    <View key={o.id}>
+                      <LinearGradient colors={colors} style={s.dealCard}
+                        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+
+                        <View style={s.dealCircle1} />
+                        <View style={s.dealCircle2} />
+
+                        {/* PLATFORM badge */}
+                        <View style={s.dealAutoBadge}>
+                          <Text style={s.dealAutoBadgeTxt}>🎁 PLATFORM OFFER</Text>
+                        </View>
+
+                        <Text style={s.dealOffAmt}>{offLabel}</Text>
+                        <Text style={s.dealOffOff}>{offSuffix}</Text>
+
+                        <Text style={s.dealTitle} numberOfLines={1}>{o.title}</Text>
+
+                        <View style={s.dealDivider} />
+
+                        <View style={s.dealBottom}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={s.dealShopName} numberOfLines={1}>🏪 All Shops</Text>
+                            {o.min_order > 0 && (
+                              <Text style={s.dealMinOrder}>Min. ₹{Math.round(o.min_order)}</Text>
+                            )}
+                          </View>
+                          {o.code_label ? (
+                            <View style={s.dealShopNow}>
+                              <Text style={s.dealShopNowTxt}>{o.code_label}</Text>
+                            </View>
+                          ) : (
+                            <View style={s.dealShopNow}>
+                              <Text style={s.dealShopNowTxt}>Auto</Text>
+                              <Ionicons name="checkmark" size={11} color="#fff" />
+                            </View>
+                          )}
+                        </View>
+
+                      </LinearGradient>
+                    </View>
+                  );
+                })}
+
+                {/* Shop deal cards */}
+                {deals.map((deal: any) => {
+                  const isPercent = deal.deal_type === 'percent';
+                  const offLabel  = isPercent ? `${Math.round(deal.deal_value)}%` : `₹${Math.round(deal.deal_value)}`;
+                  const colors: [string,string] = isPercent
+                    ? ['#FF8A00', '#FF4500']
+                    : ['#7C3AED', '#5B21B6'];
+                  return (
+                    <TouchableOpacity key={deal.id} activeOpacity={0.88}
+                      onPress={() => navigation.navigate('Shop', {
+                        shop: { id: deal.shop_id, name: deal.shop_name, category: deal.shop_category, is_open: true }
+                      })}>
+                      <LinearGradient colors={colors} style={s.dealCard}
+                        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+
+                        <View style={s.dealCircle1} />
+                        <View style={s.dealCircle2} />
+
+                        <View style={s.dealAutoBadge}>
+                          <Text style={s.dealAutoBadgeTxt}>✓ AUTO APPLY</Text>
+                        </View>
+
+                        <Text style={s.dealOffAmt}>{offLabel}</Text>
+                        <Text style={s.dealOffOff}>OFF</Text>
+
+                        <Text style={s.dealTitle} numberOfLines={1}>{deal.title}</Text>
+
+                        <View style={s.dealDivider} />
+
+                        <View style={s.dealBottom}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={s.dealShopName} numberOfLines={1}>🏪 {deal.shop_name}</Text>
+                            {deal.min_order > 0 && (
+                              <Text style={s.dealMinOrder}>Min. ₹{Math.round(deal.min_order)}</Text>
+                            )}
+                          </View>
+                          <View style={s.dealShopNow}>
+                            <Text style={s.dealShopNowTxt}>Shop</Text>
+                            <Ionicons name="arrow-forward" size={11} color="#fff" />
+                          </View>
+                        </View>
+
+                      </LinearGradient>
+                    </TouchableOpacity>
+                  );
+                })}
+
+              </ScrollView>
+            </View>
+          )}
 
           {/* ── COLLECTIONS GRID ── */}
           <View style={s.section}>
@@ -405,6 +525,33 @@ export default function HomeScreen({ navigation }: any) {
             </ScrollView>
           </View>
 
+          {/* ── HOME PRODUCERS ── */}
+          {homeProducers.length > 0 && (
+            <View style={s.section}>
+              <View style={s.secRow}>
+                <Text style={s.secTitle}>🏠 Home Producers</Text>
+                <Text style={s.secLink}>Homemade &amp; artisan</Text>
+              </View>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ gap: 12, paddingRight: 4 }}>
+                {homeProducers.map((p: any) => (
+                  <TouchableOpacity key={p.id} style={s.producerCard}
+                    onPress={() => navigation.navigate('Shop', { shop: p })} activeOpacity={0.88}>
+                    <LinearGradient colors={['#FDF4FF','#F3E8FF']} style={s.producerImg}>
+                      <Text style={{ fontSize: 28 }}>{p.producer_badge || '👩‍🍳'}</Text>
+                    </LinearGradient>
+                    <Text style={s.producerName} numberOfLines={1}>{p.name}</Text>
+                    <Text style={s.producerSub} numberOfLines={1}>{p.category}</Text>
+                    <View style={s.producerRating}>
+                      <Ionicons name="star" size={10} color="#F59E0B" />
+                      <Text style={s.producerRatingTxt}>{p.rating || '4.5'}</Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          )}
+
           {/* ── PROMO BANNER ── */}
           <View style={s.promoBannerWrap}>
             <LinearGradient colors={['#0B1A2B','#1C3A5E']} style={s.promoBanner}
@@ -419,6 +566,65 @@ export default function HomeScreen({ navigation }: any) {
               <Text style={{ fontSize:52 }}>💰</Text>
             </LinearGradient>
           </View>
+
+          {/* ── NEIGHBOURHOOD FEED ── */}
+          {feed.length > 0 && (
+            <View style={s.section}>
+              <View style={s.secRow}>
+                <Text style={s.secTitle}>📰 What's Happening</Text>
+                <Text style={s.secLink}>{feed.length} updates</Text>
+              </View>
+              {feed.slice(0, 4).map((event: any) => (
+                <TouchableOpacity key={event.id} style={s.feedCard}
+                  onPress={() => navigation.navigate('Shop', {
+                    shop: { id: event.shop_id, name: event.shop_name, is_open: true }
+                  })} activeOpacity={0.85}>
+                  <View style={s.feedIconWrap}>
+                    <Text style={{ fontSize: 20 }}>
+                      {event.event_type === 'new_deal' ? '🏷️'
+                        : event.event_type === 'shop_open' ? '🟢'
+                        : event.event_type === 'new_product' ? '✨' : '📢'}
+                    </Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.feedTitle} numberOfLines={1}>{event.title}</Text>
+                    {event.body ? <Text style={s.feedBody} numberOfLines={1}>{event.body}</Text> : null}
+                    <Text style={s.feedShop}>📍 {event.shop_name}</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={14} color="#DDD" />
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          {/* ── LATE NIGHT ── */}
+          {showLateNight && lateNightShops.length > 0 && (
+            <View style={s.section}>
+              <View style={s.secRow}>
+                <Text style={s.secTitle}>🌙 Open Late Night</Text>
+                <Text style={s.secLink}>{lateNightShops.length} open now</Text>
+              </View>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ gap: 12, paddingRight: 4 }}>
+                {lateNightShops.map((shop: any) => (
+                  <TouchableOpacity key={shop.id} style={s.nightCard}
+                    onPress={() => navigation.navigate('Shop', { shop })} activeOpacity={0.88}>
+                    <LinearGradient colors={['#0B1A2B','#1C3A5E']} style={s.nightCardGrad}>
+                      <Text style={{ fontSize: 24, marginBottom: 6 }}>
+                        {CATEGORY_EMOJI[shop.category] || '🏪'}
+                      </Text>
+                      <Text style={s.nightName} numberOfLines={1}>{shop.name}</Text>
+                      <Text style={s.nightTag}>{shop.late_night_tag || 'Open Late'}</Text>
+                      <View style={s.nightBadge}>
+                        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#22C55E' }} />
+                        <Text style={s.nightBadgeTxt}>Open now</Text>
+                      </View>
+                    </LinearGradient>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          )}
 
           </> )}
 
@@ -447,7 +653,7 @@ export default function HomeScreen({ navigation }: any) {
                 <View style={s.productGrid}>
                   {catProducts.map((p: any) => {
                     const emoji = productEmoji(p.name, p.category);
-                    const qty = getCartQty(p.id);
+                    const qty = getCartQty(p.id, p.shop_id);
                     const isOos  = p.stock_status === 'out_of_stock';
                     const isLow  = p.stock_status === 'low' || p.stock_status === 'low_stock';
                     const shopClosed = p.shop_is_open === false;
@@ -500,7 +706,7 @@ export default function HomeScreen({ navigation }: any) {
                             qty > 0 ? (
                               <View style={s.miniCounter}>
                                 <TouchableOpacity style={s.miniBtn}
-                                  onPress={() => qty === 1 ? removeItem(p.id) : updateQty(p.id, qty - 1)}>
+                                  onPress={() => qty === 1 ? removeItem(p.id, p.shop_id) : updateQty(p.id, p.shop_id, qty - 1)}>
                                   <Text style={{ color:'#fff', fontSize:16, fontWeight:'800', lineHeight:20 }}>−</Text>
                                 </TouchableOpacity>
                                 <Text style={s.miniNum}>{qty}</Text>
@@ -676,16 +882,6 @@ const s = StyleSheet.create({
   dot:            { width:5, height:5, borderRadius:2.5, backgroundColor:'#DDD' },
   dotOn:          { backgroundColor:'#FF8A00', width:16 },
 
-  // Offers
-  offerScroll:    { marginTop:14 },
-  offerContent:   { paddingHorizontal:16, gap:10 },
-  offerChip:      { borderRadius:14, padding:12, borderWidth:1, minWidth:140 },
-  offerAmt:       { fontSize:20, fontWeight:'900', marginBottom:2 },
-  offerSub:       { fontSize:11, color:'#666', marginBottom:8 },
-  codeBox:        { borderWidth:1, borderStyle:'dashed', borderRadius:6,
-                     paddingHorizontal:8, paddingVertical:3, alignSelf:'flex-start' },
-  codeTxt:        { fontSize:11, fontWeight:'800', letterSpacing:1 },
-
   // Sections
   section:        { paddingHorizontal:16, marginTop:20 },
   secRow:         { flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:12 },
@@ -777,6 +973,57 @@ const s = StyleSheet.create({
   miniCounter:    { flexDirection:'row', alignItems:'center', backgroundColor:'#FF8A00', borderRadius:8, overflow:'hidden' },
   miniBtn:        { width:24, height:26, alignItems:'center', justifyContent:'center' },
   miniNum:        { fontSize:12, fontWeight:'800', color:'#fff', minWidth:20, textAlign:'center' },
+  // Deal cards
+  dealCard:        { width: 186, borderRadius: 20, padding: 14, overflow: 'hidden',
+                      shadowColor: '#7C3AED', shadowOpacity: 0.3, shadowRadius: 12,
+                      shadowOffset: { width: 0, height: 4 }, elevation: 6 },
+  dealCircle1:     { position: 'absolute', width: 100, height: 100, borderRadius: 50,
+                      backgroundColor: 'rgba(255,255,255,0.07)', top: -28, right: -28 },
+  dealCircle2:     { position: 'absolute', width: 60, height: 60, borderRadius: 30,
+                      backgroundColor: 'rgba(255,255,255,0.06)', bottom: 10, right: 10 },
+  dealAutoBadge:   { alignSelf: 'flex-start', backgroundColor: 'rgba(255,255,255,0.22)',
+                      borderRadius: 20, paddingHorizontal: 8, paddingVertical: 3, marginBottom: 10 },
+  dealAutoBadgeTxt:{ fontSize: 9, fontWeight: '800', color: '#fff', letterSpacing: 0.8 },
+  dealOffAmt:      { fontSize: 36, fontWeight: '900', color: '#fff', lineHeight: 38 },
+  dealOffOff:      { fontSize: 12, fontWeight: '800', color: 'rgba(255,255,255,0.7)',
+                      letterSpacing: 2, marginBottom: 8 },
+  dealTitle:       { fontSize: 12, fontWeight: '600', color: 'rgba(255,255,255,0.85)',
+                      lineHeight: 17, marginBottom: 10 },
+  dealDivider:     { height: 1, backgroundColor: 'rgba(255,255,255,0.15)', marginBottom: 10 },
+  dealBottom:      { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  dealShopName:    { fontSize: 11, fontWeight: '700', color: 'rgba(255,255,255,0.85)', marginBottom: 2 },
+  dealMinOrder:    { fontSize: 10, color: 'rgba(255,255,255,0.55)' },
+  dealShopNow:     { flexDirection: 'row', alignItems: 'center', gap: 3,
+                      backgroundColor: 'rgba(255,255,255,0.22)', borderRadius: 8,
+                      paddingHorizontal: 8, paddingVertical: 5, flexShrink: 0 },
+  dealShopNowTxt:  { fontSize: 11, fontWeight: '800', color: '#fff' },
+
+  // Home producer cards
+  producerCard:   { width:110, alignItems:'center' },
+  producerImg:    { width:80, height:80, borderRadius:40, alignItems:'center', justifyContent:'center', marginBottom:8 },
+  producerName:   { fontSize:12, fontWeight:'700', color:'#111', textAlign:'center', marginBottom:2 },
+  producerSub:    { fontSize:11, color:'#888', textAlign:'center', marginBottom:4 },
+  producerRating: { flexDirection:'row', alignItems:'center', gap:3 },
+  producerRatingTxt:{ fontSize:11, color:'#F59E0B', fontWeight:'700' },
+
+  // Feed cards
+  feedCard:       { backgroundColor:'#fff', borderRadius:14, padding:12, marginBottom:10,
+                     flexDirection:'row', alignItems:'center', gap:10,
+                     shadowColor:'#000', shadowOpacity:0.04, shadowRadius:6, shadowOffset:{width:0,height:2} },
+  feedIconWrap:   { width:40, height:40, borderRadius:12, backgroundColor:'#FFF4E6',
+                     alignItems:'center', justifyContent:'center', flexShrink:0 },
+  feedTitle:      { fontSize:13, fontWeight:'700', color:'#111', marginBottom:2 },
+  feedBody:       { fontSize:12, color:'#555', marginBottom:3 },
+  feedShop:       { fontSize:11, color:'#AAA' },
+
+  // Late night cards
+  nightCard:      { width:130, borderRadius:18, overflow:'hidden' },
+  nightCardGrad:  { padding:14, height:150, justifyContent:'flex-end' },
+  nightName:      { fontSize:13, fontWeight:'800', color:'#fff', marginBottom:3 },
+  nightTag:       { fontSize:10, color:'rgba(255,255,255,0.6)', marginBottom:8 },
+  nightBadge:     { flexDirection:'row', alignItems:'center', gap:5 },
+  nightBadgeTxt:  { fontSize:11, fontWeight:'700', color:'#22C55E' },
+
   bottomCta:      { margin:16, backgroundColor:'#fff', borderRadius:20, padding:20, alignItems:'center', gap:6,
                      shadowColor:'#000', shadowOpacity:0.05, shadowRadius:10, shadowOffset:{width:0,height:3} },
   bottomCtaTitle: { fontSize:16, fontWeight:'800', color:'#111' },

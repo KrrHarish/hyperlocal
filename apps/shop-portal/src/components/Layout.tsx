@@ -71,9 +71,11 @@ function urlBase64ToUint8Array(base64String: string) {
 }
 
 const NAV = [
-  { to: '/dashboard', icon: '◈', label: 'Dashboard' },
+  { to: '/dashboard', icon: '◈',  label: 'Dashboard' },
   { to: '/orders',    icon: '🔔', label: 'Orders'    },
   { to: '/catalogue', icon: '📦', label: 'Catalogue' },
+  { to: '/deals',     icon: '🏷️', label: 'Deals'     },
+  { to: '/chat',      icon: '💬', label: 'Messages'  },
 ]
 
 // ── Browser notification helper ────────────────────────────────────
@@ -112,7 +114,7 @@ export default function Layout() {
   const [toggling, setToggling] = useState(false)
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
   const [soundEnabled, setSoundEnabled]   = useState(true)
-  const [notifEnabled, setNotifEnabled]   = useState(() => Notification.permission === 'granted' || true)
+  const [notifEnabled, setNotifEnabled]   = useState<boolean>(() => Notification.permission === 'granted')
   const pushSubRef      = useRef<PushSubscription | null>(null)
   const soundEnabledRef = useRef(soundEnabled)
   useEffect(() => { soundEnabledRef.current = soundEnabled }, [soundEnabled])

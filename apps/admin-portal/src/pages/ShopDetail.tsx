@@ -50,12 +50,16 @@ export default function ShopDetail() {
     getShop(id).then(r => {
       setData(r.data)
       setEditForm({
-        name:     r.data.shop.name,
-        category: r.data.shop.category,
-        address:  r.data.shop.address ?? '',
-        phone:    r.data.shop.phone   ?? '',
-        lat:      r.data.shop.lat     ?? '',
-        lng:      r.data.shop.lng     ?? '',
+        name:           r.data.shop.name,
+        category:       r.data.shop.category,
+        address:        r.data.shop.address   ?? '',
+        phone:          r.data.shop.phone     ?? '',
+        lat:            r.data.shop.lat       ?? '',
+        lng:            r.data.shop.lng       ?? '',
+        shop_type:      r.data.shop.shop_type ?? 'regular',
+        is_24h:         r.data.shop.is_24h    ?? false,
+        late_night_tag: r.data.shop.late_night_tag ?? '',
+        producer_badge: r.data.shop.producer_badge ?? '',
       })
     }).finally(() => setLoading(false))
   }, [id])
@@ -102,12 +106,16 @@ export default function ShopDetail() {
     setSaving(true)
     try {
       await updateShop(id, {
-        name:     editForm.name.trim(),
-        category: editForm.category,
-        address:  editForm.address.trim(),
-        phone:    editForm.phone.trim() || null,
-        lat:      editForm.lat ? parseFloat(editForm.lat) : null,
-        lng:      editForm.lng ? parseFloat(editForm.lng) : null,
+        name:           editForm.name.trim(),
+        category:       editForm.category,
+        address:        editForm.address.trim(),
+        phone:          editForm.phone.trim() || null,
+        lat:            editForm.lat ? parseFloat(editForm.lat) : null,
+        lng:            editForm.lng ? parseFloat(editForm.lng) : null,
+        shop_type:      editForm.shop_type      || 'regular',
+        is_24h:         editForm.is_24h         ?? false,
+        late_night_tag: editForm.late_night_tag.trim() || null,
+        producer_badge: editForm.producer_badge.trim() || null,
       })
       setShowEdit(false)
       load()
@@ -325,6 +333,36 @@ export default function ShopDetail() {
               <div style={{ marginBottom:12 }}>
                 <label style={lbl}>Phone</label>
                 <input style={inp} value={editForm.phone} onChange={e => setEF('phone', e.target.value)} />
+              </div>
+              <div style={{ ...grid2, marginBottom:12 }}>
+                <div>
+                  <label style={lbl}>Shop Type</label>
+                  <select style={inp} value={editForm.shop_type} onChange={e => setEF('shop_type', e.target.value)}>
+                    <option value="regular">Regular</option>
+                    <option value="home_producer">Home Producer</option>
+                    <option value="dark_store">Dark Store</option>
+                  </select>
+                </div>
+                <div style={{ display:'flex', alignItems:'center', gap:10, paddingTop:24 }}>
+                  <input type="checkbox" id="is24h" checked={!!editForm.is_24h}
+                    onChange={e => setEditForm((f: any) => ({ ...f, is_24h: e.target.checked }))}
+                    style={{ width:18, height:18, cursor:'pointer' }} />
+                  <label htmlFor="is24h" style={{ ...lbl, margin:0, cursor:'pointer', fontSize:14 }}>Open 24 hours</label>
+                </div>
+              </div>
+              <div style={{ ...grid2, marginBottom:12 }}>
+                <div>
+                  <label style={lbl}>Late Night Tag</label>
+                  <input style={inp} value={editForm.late_night_tag} placeholder="e.g. Open till 2 AM"
+                    onChange={e => setEF('late_night_tag', e.target.value)} />
+                </div>
+                {editForm.shop_type === 'home_producer' && (
+                  <div>
+                    <label style={lbl}>Producer Badge Emoji</label>
+                    <input style={inp} value={editForm.producer_badge} placeholder="e.g. 👩‍🍳"
+                      onChange={e => setEF('producer_badge', e.target.value)} />
+                  </div>
+                )}
               </div>
               <div style={{ ...grid2, marginBottom:16 }}>
                 <div>
