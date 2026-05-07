@@ -169,4 +169,8 @@ export const getHomeProducers = (lat: number, lng: number) =>
 // ── PLATFORM OFFERS ───────────────────────────────────
 export const getPlatformOffers = () => api.get('/platform-offers');
 
+// ── APP CATEGORIES ────────────────────────────────────
+export const getAppCategories = (lat?: number, lng?: number) =>
+  api.get('/app-categories', { params: lat && lng ? { lat, lng } : {} });
+
 export default api;

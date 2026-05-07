@@ -12,6 +12,7 @@ import Customers from './pages/Customers'
 import CustomerDetail from './pages/CustomerDetail'
 import FleetMap from './pages/FleetMap'
 import PlatformOffers from './pages/PlatformOffers'
+import AppCategories from './pages/AppCategories'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const token = localStorage.getItem('zuqu_admin_token')
@@ -86,7 +87,8 @@ export default function App() {
                   <Route path="/customers"         element={<Customers />} />
                   <Route path="/customers/:id"     element={<CustomerDetail />} />
                   <Route path="/fleet"             element={<FleetMap />} />
-                  <Route path="/platform-offers"  element={<PlatformOffers />} />
+                  <Route path="/platform-offers"   element={<PlatformOffers />} />
+                  <Route path="/app-categories"    element={<AppCategories />} />
                   <Route path="*"                  element={<Navigate to="/" replace />} />
                 </Routes>
               </Layout>

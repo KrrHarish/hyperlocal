@@ -8,7 +8,8 @@ const NAV = [
   { to: '/shops',     label: 'Shops',     icon: '🏪' },
   { to: '/customers', label: 'Customers', icon: '👥' },
   { to: '/fleet',     label: 'Fleet Map', icon: '🗺️' },
-  { to: '/platform-offers', label: 'Platform Offers', icon: '🎁' },
+  { to: '/platform-offers',  label: 'Platform Offers', icon: '🎁' },
+  { to: '/app-categories',   label: 'App Categories',  icon: '📱' },
 ]
 
 export default function Layout({ children }: { children: React.ReactNode }) {

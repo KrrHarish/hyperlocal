@@ -3,7 +3,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import {
   View, Text, ScrollView, TouchableOpacity,
   StyleSheet, RefreshControl, ActivityIndicator,
-  Dimensions, FlatList, ViewToken, Image,
+  Dimensions, FlatList, ViewToken, Image, Modal,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
@@ -12,25 +12,44 @@ import * as Location from 'expo-location';
 import {
   getNearbyShops, getProductsByCategory, IMAGE_BASE,
   getActiveDeals, getNeighbourhoodFeed, getHomeProducers, getLateNightShops,
-  getPlatformOffers,
+  getPlatformOffers, getAppCategories,
 } from '../services/api';
 import { useCart } from '../store/CartContext';
 import { useProductSocket } from '../hooks/useProductSocket';
+import { useCategory, AppCategory } from '../store/CategoryContext';
 
 const { width: W } = Dimensions.get('window');
 
 // ─── DATA ────────────────────────────────────────────────────────
-const CATEGORIES = [
-  { id:'all',           label:'All',        emoji:'🏪' },
-  { id:'grocery',       label:'Grocery',    emoji:'🥦' },
-  { id:'dairy',         label:'Dairy',      emoji:'🥛' },
-  { id:'snacks',        label:'Snacks',     emoji:'🍿' },
-  { id:'beverages',     label:'Drinks',     emoji:'🧃' },
-  { id:'personal_care', label:'Care',       emoji:'🧴' },
-  { id:'pharmacy',      label:'Medicine',   emoji:'💊' },
-  { id:'bakery',        label:'Bakery',     emoji:'🍞' },
-  { id:'household',     label:'Home',       emoji:'🧹' },
-];
+const CAT_CHIPS: Record<string, { id:string; label:string; emoji:string }[]> = {
+  grocery: [
+    { id:'all',           label:'All',      emoji:'🏪' },
+    { id:'grocery',       label:'Grocery',  emoji:'🥦' },
+    { id:'dairy',         label:'Dairy',    emoji:'🥛' },
+    { id:'snacks',        label:'Snacks',   emoji:'🍿' },
+    { id:'beverages',     label:'Drinks',   emoji:'🧃' },
+    { id:'bakery',        label:'Bakery',   emoji:'🍞' },
+    { id:'household',     label:'Home',     emoji:'🧹' },
+    { id:'personal_care', label:'Care',     emoji:'🧴' },
+  ],
+  food: [
+    { id:'all',            label:'All',          emoji:'🍽️' },
+    { id:'restaurant',     label:'Restaurant',   emoji:'🍴' },
+    { id:'cafe',           label:'Café',          emoji:'☕' },
+    { id:'fast_food',      label:'Fast Food',    emoji:'🍔' },
+    { id:'tiffin',         label:'Tiffin',       emoji:'🍱' },
+    { id:'cloud_kitchen',  label:'Cloud Kitchen',emoji:'👨‍🍳' },
+    { id:'sweets',         label:'Sweets',       emoji:'🍮' },
+  ],
+  medicine: [
+    { id:'all',       label:'All',       emoji:'🏥' },
+    { id:'pharmacy',  label:'Pharmacy',  emoji:'💊' },
+    { id:'wellness',  label:'Wellness',  emoji:'🧘' },
+    { id:'medical',   label:'Medical',   emoji:'🩺' },
+  ],
+};
+// fallback — same as grocery
+const CATEGORIES = CAT_CHIPS.grocery;
 
 const BANNERS = [
   { id:1, title:'⚡ Under 20 Minutes',  sub:'Express delivery from your local shop', color1:'#FF8A00', color2:'#FF5C00', emoji:'🛵', badge:'NEW' },
@@ -45,6 +64,24 @@ const COLLECTIONS = [
   { id:'cleaning',  label:'Cleaning Supplies',     emoji:'🧹', count:31, color:'#EFF6FF' },
   { id:'baby',      label:'Baby & Kids',            emoji:'👶', count:15, color:'#FDF4FF' },
 ];
+
+function greeting() {
+  const h = new Date().getHours();
+  if (h < 12) return 'Good morning ☀️';
+  if (h < 17) return 'Good afternoon 👋';
+  return 'Good evening 🌙';
+}
+
+// Per-category accent colours (used by header card)
+const CAT_COLORS: Record<string, [string, string]> = {
+  grocery:   ['#FF8A00', '#FF4D00'],
+  food:      ['#E63946', '#C1121F'],
+  medicine:  ['#0096C7', '#0077B6'],
+  bike_taxi: ['#6366F1', '#4F46E5'],
+};
+const CAT_LIGHT: Record<string, string> = {
+  grocery: '#FFF4E5', food: '#FFF0F0', medicine: '#E8F6FC', bike_taxi: '#EFEFFF',
+};
 
 // No mock shops or products — all data comes from the real API
 
@@ -84,7 +121,8 @@ function productEmoji(name: string, category: string): string {
 
 // ─── COMPONENT ──────────────────────────────────────────────────
 export default function HomeScreen({ navigation }: any) {
-  const [search]                        = useState(''); // kept for filtered shops logic
+  const { selectedCategory, setSelectedCategory } = useCategory();
+  const [search]                        = useState('');
   const [category, setCategory]        = useState('all');
   const [shops, setShops]              = useState<any[]>([]);
   const [loading, setLoading]          = useState(true);
@@ -99,13 +137,25 @@ export default function HomeScreen({ navigation }: any) {
   const [homeProducers, setHomeProducers] = useState<any[]>([]);
   const [lateNightShops, setLateNightShops] = useState<any[]>([]);
   const [platformOffers, setPlatformOffers] = useState<any[]>([]);
-  const [bannerIdx, setBannerIdx]     = useState(0);
+  const [bannerIdx, setBannerIdx]         = useState(0);
+  const [menuOpen, setMenuOpen]           = useState(false);
+  const [allCategories, setAllCategories] = useState<AppCategory[]>([]);
   const bannerRef = useRef<FlatList<typeof BANNERS[0]>>(null);
   const bannerTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const { addItem, shops: cartShops, getShopItems, updateQty, removeItem } = useCart();
 
   const hr = new Date().getHours();
   const showLateNight = hr >= 22 || hr < 6;
+
+  // Load categories for the bottom sheet
+  useEffect(() => {
+    getAppCategories()
+      .then(res => setAllCategories(res.data?.categories ?? []))
+      .catch(() => {});
+  }, []);
+
+  // Reset chip filter when the app-level category changes
+  useEffect(() => { setCategory('all'); }, [selectedCategory?.key]);
 
   // ── Auto-scroll banners
   useEffect(() => {
@@ -233,17 +283,35 @@ export default function HomeScreen({ navigation }: any) {
   const handleAddToCart = (p: any) =>
     addItem({ product_id: p.id, name: p.name, price: p.price, quantity: 1 }, p.shop_id, p.shop_name);
 
+  // Map selected app-category → which shop category values belong to it
+  const APP_CAT_SHOP_TYPES: Record<string, string[]> = {
+    grocery:  ['grocery', 'bakery', 'dairy', 'supermarket', 'kirana', 'general', 'snacks',
+                'beverages', 'household', 'personal_care', 'home', 'essentials'],
+    food:     ['restaurant', 'food', 'tiffin', 'cafe', 'fast_food', 'hotel', 'dhaba',
+                'cloud_kitchen', 'homemade', 'sweets', 'desserts'],
+    medicine: ['pharmacy', 'medicine', 'medical', 'health', 'wellness', 'chemist'],
+  };
+
+  const appCatKey   = selectedCategory?.key ?? 'grocery';
+  const allowedTypes = APP_CAT_SHOP_TYPES[appCatKey] ?? [];
+  const activeChips  = CAT_CHIPS[appCatKey] ?? CAT_CHIPS.grocery;
+
   const filtered = shops.filter(s => {
     const matchSearch = !search || s.name.toLowerCase().includes(search.toLowerCase());
-    if (category === 'all') return matchSearch;
-    // Match by category field OR by tags array
+
+    // Filter by selected app category (from the category-select screen)
+    const shopCat = (s.category || '').toLowerCase();
+    const shopTags = (s.tags || []).map((t: string) => t.toLowerCase());
+    const matchAppCat = allowedTypes.length === 0 ||
+      allowedTypes.includes(shopCat) ||
+      shopTags.some((t: string) => allowedTypes.includes(t));
+
+    // Additionally filter by the in-screen category chip
+    if (category === 'all') return matchSearch && matchAppCat;
     const catLabel = CATEGORIES.find(c => c.id === category)?.label?.toLowerCase() || '';
-    const matchCat = s.category === category ||
-      (s.tags || []).some((t: string) =>
-        t.toLowerCase() === category ||
-        t.toLowerCase() === catLabel
-      );
-    return matchCat && matchSearch;
+    const matchChip = shopCat === category ||
+      shopTags.some((t: string) => t === category || t === catLabel);
+    return matchSearch && matchAppCat && matchChip;
   });
 
   return (
@@ -251,40 +319,125 @@ export default function HomeScreen({ navigation }: any) {
       <StatusBar style="light" />
 
       {/* ── STICKY HEADER ── */}
-      <LinearGradient colors={['#FF8A00','#FF5C00']} style={s.header}>
-        <View style={s.hTop}>
-          <TouchableOpacity style={s.locationWrap} activeOpacity={0.7}>
-            <View style={s.locationRow}>
-              <Ionicons name="location-sharp" size={14} color="rgba(255,255,255,0.9)" />
-              <Text style={s.locationLbl}>Delivering to</Text>
-              <Ionicons name="chevron-down" size={13} color="rgba(255,255,255,0.8)" />
-            </View>
-            <Text style={s.locationTxt} numberOfLines={1}>{locationName}</Text>
-          </TouchableOpacity>
+      {(() => {
+        const key    = selectedCategory?.key ?? 'grocery';
+        const colors = CAT_COLORS[key] ?? CAT_COLORS.grocery;
+        return (
+          <LinearGradient colors={colors} style={s.header}
+            start={{ x:0, y:0 }} end={{ x:1, y:1 }}>
 
-          <View style={s.hActions}>
-            <TouchableOpacity style={s.hBtn}>
-              <Ionicons name="notifications-outline" size={22} color="#fff" />
-              <View style={s.notifDot} />
-            </TouchableOpacity>
-            <TouchableOpacity style={s.hBtn} onPress={() => navigation.navigate('Profile')}>
-              <View style={s.avatarSmall}>
-                <Ionicons name="person" size={18} color="#FF8A00" />
+            {/* Decorative blobs */}
+            <View style={s.hBlob1} />
+            <View style={s.hBlob2} />
+
+            {/* Row 1 — location + actions */}
+            <View style={s.hTop}>
+              <TouchableOpacity style={s.locationWrap} activeOpacity={0.7}>
+                <View style={s.locationRow}>
+                  <Ionicons name="location-sharp" size={13} color="rgba(255,255,255,0.9)" />
+                  <Text style={s.locationLbl}>Delivering to</Text>
+                  <Ionicons name="chevron-down" size={12} color="rgba(255,255,255,0.7)" />
+                </View>
+                <Text style={s.locationTxt} numberOfLines={1}>{locationName}</Text>
+              </TouchableOpacity>
+              <View style={s.hActions}>
+                <TouchableOpacity style={s.hBtn}>
+                  <Ionicons name="notifications-outline" size={22} color="#fff" />
+                  <View style={s.notifDot} />
+                </TouchableOpacity>
+                <TouchableOpacity style={s.hBtn} onPress={() => navigation.navigate('Profile')}>
+                  <View style={s.avatarSmall}>
+                    <Ionicons name="person" size={18} color={colors[0]} />
+                  </View>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Row 2 — category switcher row */}
+            <TouchableOpacity style={s.catCard} activeOpacity={0.8}
+              onPress={() => setMenuOpen(true)}>
+              <View style={s.catCardBubble}>
+                <Text style={{ fontSize: 20 }}>{selectedCategory?.emoji ?? '🏪'}</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.catCardMeta}>Currently browsing</Text>
+                <Text style={s.catCardName} numberOfLines={1}>
+                  {selectedCategory?.name ?? 'Choose service'}
+                </Text>
+              </View>
+              <View style={s.catCardBadge}>
+                <Text style={s.catCardBadgeTxt}>Switch</Text>
+                <Ionicons name="chevron-down" size={11} color="#fff" />
               </View>
             </TouchableOpacity>
-          </View>
-        </View>
 
-        {/* Search bar — tapping opens SearchScreen */}
-        <TouchableOpacity style={s.searchBar} activeOpacity={0.85}
-          onPress={() => navigation.navigate('Search')}>
-          <Ionicons name="search-outline" size={18} color="#999" />
-          <Text style={s.searchPlaceholder}>Search shops, products, brands…</Text>
-          <View style={s.searchFilter}>
-            <Ionicons name="options-outline" size={16} color="#FF8A00" />
-          </View>
+            {/* Row 3 — search bar */}
+            <TouchableOpacity style={s.searchBar} activeOpacity={0.85}
+              onPress={() => navigation.navigate('Search')}>
+              <Ionicons name="search-outline" size={18} color="#999" />
+              <Text style={s.searchPlaceholder}>Search shops, products, brands…</Text>
+              <View style={s.searchFilter}>
+                <Ionicons name="options-outline" size={16} color={colors[0]} />
+              </View>
+            </TouchableOpacity>
+
+          </LinearGradient>
+        );
+      })()}
+
+      {/* ── CATEGORY BOTTOM SHEET MODAL ── */}
+      <Modal
+        visible={menuOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setMenuOpen(false)}
+      >
+        <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setMenuOpen(false)}>
+          <TouchableOpacity style={s.menuSheet} activeOpacity={1}>
+            {/* Handle */}
+            <View style={s.menuHandle} />
+
+            <Text style={s.menuHeading}>Switch Service</Text>
+
+            {allCategories.map((cat, idx) => {
+              const isActive = cat.key === selectedCategory?.key;
+              const isUC     = cat.under_construction;
+              const isLast   = idx === allCategories.length - 1;
+              return (
+                <TouchableOpacity
+                  key={cat.id}
+                  activeOpacity={isUC ? 1 : 0.75}
+                  onPress={() => { if (isUC) return; setSelectedCategory(cat); setMenuOpen(false); }}
+                  style={[s.menuItem, !isLast && s.menuItemBorder, isActive && s.menuItemActive]}
+                >
+                  {/* Emoji block */}
+                  <View style={[s.menuItemIcon, { opacity: isUC ? 0.35 : 1 }]}>
+                    <Text style={{ fontSize: 24 }}>{cat.emoji}</Text>
+                  </View>
+
+                  <View style={{ flex: 1 }}>
+                    {isUC && (
+                      <View style={s.ucChip}>
+                        <Text style={s.ucChipTxt}>🚧 Coming soon</Text>
+                      </View>
+                    )}
+                    <Text style={[s.menuItemName, isUC && { color: '#555' }]}>{cat.name}</Text>
+                    <Text style={[s.menuItemDesc, isUC && { color: '#444' }]} numberOfLines={1}>
+                      {cat.description}
+                    </Text>
+                  </View>
+
+                  {isActive
+                    ? <Ionicons name="checkmark-circle" size={22} color="#FF8A00" />
+                    : !isUC && <Ionicons name="chevron-forward" size={16} color="#555" />}
+                </TouchableOpacity>
+              );
+            })}
+
+            <View style={{ height: 28 }} />
+          </TouchableOpacity>
         </TouchableOpacity>
-      </LinearGradient>
+      </Modal>
 
       {loading ? (
         <View style={s.center}>
@@ -296,10 +449,10 @@ export default function HomeScreen({ navigation }: any) {
           showsVerticalScrollIndicator={false}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => fetchShops(true)} tintColor="#FF8A00" />}
         >
-          {/* ── CATEGORY TABS ── */}
+          {/* ── CATEGORY CHIPS — dynamic per service ── */}
           <View style={s.catWrap}>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.catContent}>
-              {CATEGORIES.map(c => (
+              {activeChips.map(c => (
                 <TouchableOpacity key={c.id}
                   style={[s.catChip, category === c.id && s.catChipOn]}
                   onPress={() => setCategory(c.id)}>
@@ -354,7 +507,7 @@ export default function HomeScreen({ navigation }: any) {
           </View>
 
           {/* ── LIVE DEALS STRIP (shop deals + platform offers combined) ── */}
-          {(deals.length > 0 || platformOffers.length > 0) && (
+          {(deals.some(d => allowedTypes.length === 0 || allowedTypes.includes((d.shop_category||'').toLowerCase())) || platformOffers.length > 0) && (
             <View style={s.section}>
               <View style={s.secRow}>
                 <Text style={s.secTitle}>🔥 Live Deals</Text>
@@ -423,8 +576,11 @@ export default function HomeScreen({ navigation }: any) {
                   );
                 })}
 
-                {/* Shop deal cards */}
-                {deals.map((deal: any) => {
+                {/* Shop deal cards — filtered to selected app-category */}
+                {deals.filter((deal: any) => {
+                  const shopCat = (deal.shop_category || '').toLowerCase();
+                  return allowedTypes.length === 0 || allowedTypes.includes(shopCat);
+                }).map((deal: any) => {
                   const isPercent = deal.deal_type === 'percent';
                   const offLabel  = isPercent ? `${Math.round(deal.deal_value)}%` : `₹${Math.round(deal.deal_value)}`;
                   const colors: [string,string] = isPercent
@@ -474,8 +630,8 @@ export default function HomeScreen({ navigation }: any) {
             </View>
           )}
 
-          {/* ── COLLECTIONS GRID ── */}
-          <View style={s.section}>
+          {/* ── COLLECTIONS GRID — grocery only ── */}
+          {appCatKey === 'grocery' && <View style={s.section}>
             <View style={s.secRow}>
               <Text style={s.secTitle}>Shop by Category</Text>
               <TouchableOpacity><Text style={s.secLink}>See all</Text></TouchableOpacity>
@@ -490,7 +646,7 @@ export default function HomeScreen({ navigation }: any) {
                 </TouchableOpacity>
               ))}
             </View>
-          </View>
+          </View>}
 
           {/* ── FEATURED SHOPS HORIZONTAL SCROLL ── */}
           <View style={s.section}>
@@ -500,7 +656,7 @@ export default function HomeScreen({ navigation }: any) {
             </View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}
               contentContainerStyle={s.featuredContent}>
-              {shops.filter(s => s.is_open).slice(0,4).map(shop => (
+              {filtered.filter(s => s.is_open).slice(0,4).map(shop => (
                 <TouchableOpacity key={shop.id} style={s.featuredCard}
                   onPress={() => navigation.navigate('Shop', { shop })} activeOpacity={0.88}>
                   {shop.image_url ? (
@@ -633,8 +789,8 @@ export default function HomeScreen({ navigation }: any) {
             <View style={s.section}>
               <View style={s.secRow}>
                 <Text style={s.secTitle}>
-                  {CATEGORIES.find(c => c.id === category)?.emoji}{' '}
-                  {CATEGORIES.find(c => c.id === category)?.label}
+                  {activeChips.find(c => c.id === category)?.emoji}{' '}
+                  {activeChips.find(c => c.id === category)?.label}
                 </Text>
                 <Text style={s.secLink}>{catProducts.length} items</Text>
               </View>
@@ -836,22 +992,67 @@ const s = StyleSheet.create({
   loadTxt:        { fontSize:14, color:'#888' },
 
   // Header
-  header:         { paddingTop:56, paddingBottom:14, paddingHorizontal:16 },
-  hTop:           { flexDirection:'row', alignItems:'flex-start', justifyContent:'space-between', marginBottom:12 },
+  header:         { paddingTop:54, paddingHorizontal:16, paddingBottom:14, overflow:'hidden' },
+  hBlob1:         { position:'absolute', width:180, height:180, borderRadius:90,
+                     backgroundColor:'rgba(255,255,255,0.07)', top:-60, right:-40 },
+  hBlob2:         { position:'absolute', width:110, height:110, borderRadius:55,
+                     backgroundColor:'rgba(255,255,255,0.05)', bottom:10, left:-30 },
+
+  hTop:           { flexDirection:'row', alignItems:'center',
+                     justifyContent:'space-between', marginBottom:12 },
   locationWrap:   { flex:1 },
-  locationRow:    { flexDirection:'row', alignItems:'center', gap:4, marginBottom:3 },
-  locationLbl:    { color:'rgba(255,255,255,0.8)', fontSize:12 },
-  locationTxt:    { color:'#fff', fontSize:18, fontWeight:'800', maxWidth:220 },
+  locationRow:    { flexDirection:'row', alignItems:'center', gap:4, marginBottom:2 },
+  locationLbl:    { color:'rgba(255,255,255,0.75)', fontSize:11, fontWeight:'500' },
+  locationTxt:    { color:'#fff', fontSize:17, fontWeight:'900', maxWidth:210, letterSpacing:-0.3 },
   hActions:       { flexDirection:'row', gap:8, alignItems:'center' },
-  hBtn:           { width:38, height:38, borderRadius:19, backgroundColor:'rgba(255,255,255,0.2)',
+
+  // Category switcher row (frosted strip inside the gradient)
+  catCard:        { flexDirection:'row', alignItems:'center', gap:12,
+                     backgroundColor:'rgba(0,0,0,0.12)',
+                     borderRadius:16, paddingHorizontal:14, paddingVertical:11,
+                     marginBottom:12,
+                     borderWidth:1, borderColor:'rgba(255,255,255,0.15)' },
+  catCardBubble:  { width:38, height:38, borderRadius:11,
+                     backgroundColor:'rgba(255,255,255,0.2)',
+                     alignItems:'center', justifyContent:'center', flexShrink:0 },
+  catCardMeta:    { fontSize:10, color:'rgba(255,255,255,0.7)', fontWeight:'600',
+                     textTransform:'uppercase', letterSpacing:0.5, marginBottom:2 },
+  catCardName:    { fontSize:15, fontWeight:'900', color:'#fff', letterSpacing:-0.2 },
+  catCardBadge:   { flexDirection:'row', alignItems:'center', gap:4,
+                     backgroundColor:'rgba(255,255,255,0.2)',
+                     borderRadius:99, paddingHorizontal:10, paddingVertical:5, flexShrink:0 },
+  catCardBadgeTxt:{ fontSize:12, fontWeight:'800', color:'#fff' },
+
+  hBtn:           { width:38, height:38, borderRadius:19,
+                     backgroundColor:'rgba(255,255,255,0.2)',
                      alignItems:'center', justifyContent:'center' },
   notifDot:       { position:'absolute', top:6, right:6, width:8, height:8, borderRadius:4,
-                     backgroundColor:'#22C55E', borderWidth:1.5, borderColor:'#FF8A00' },
-  avatarSmall:    { width:32, height:32, borderRadius:16, backgroundColor:'#fff',
+                     backgroundColor:'#22C55E', borderWidth:1.5, borderColor:'transparent' },
+  avatarSmall:    { width:32, height:32, borderRadius:16,
+                     backgroundColor:'rgba(255,255,255,0.9)',
                      alignItems:'center', justifyContent:'center' },
+
+  // Category bottom sheet modal
+  modalOverlay:   { flex:1, backgroundColor:'rgba(0,0,0,0.55)', justifyContent:'flex-end' },
+  menuSheet:      { backgroundColor:'#1C1C1E', borderTopLeftRadius:28, borderTopRightRadius:28,
+                     paddingHorizontal:20, paddingTop:12 },
+  menuHandle:     { width:40, height:4, borderRadius:2, backgroundColor:'#444',
+                     alignSelf:'center', marginBottom:16 },
+  menuHeading:    { fontSize:13, fontWeight:'700', color:'#666', letterSpacing:1,
+                     textTransform:'uppercase', marginBottom:10 },
+  menuItem:       { flexDirection:'row', alignItems:'center', gap:14, paddingVertical:14 },
+  menuItemBorder: { borderBottomWidth:1, borderBottomColor:'#2C2C2E' },
+  menuItemActive: { },
+  menuItemIcon:   { width:52, height:52, borderRadius:14, backgroundColor:'#2C2C2E',
+                     alignItems:'center', justifyContent:'center', flexShrink:0 },
+  menuItemName:   { fontSize:16, fontWeight:'800', color:'#fff', marginBottom:3 },
+  menuItemDesc:   { fontSize:12, color:'#888', lineHeight:16 },
+  ucChip:         { alignSelf:'flex-start', backgroundColor:'#3A2F00', borderRadius:99,
+                     paddingHorizontal:8, paddingVertical:2, marginBottom:4 },
+  ucChipTxt:      { fontSize:10, fontWeight:'700', color:'#F59E0B' },
+
   searchBar:      { flexDirection:'row', alignItems:'center', backgroundColor:'#fff',
-                     borderRadius:14, paddingHorizontal:14, height:46, gap:10,
-                     shadowColor:'#000', shadowOpacity:0.1, shadowRadius:8, shadowOffset:{width:0,height:2} },
+                     borderRadius:14, paddingHorizontal:14, height:44, gap:10 },
   searchPlaceholder:{ flex:1, fontSize:14, color:'#BBB' },
   searchFilter:   { width:28, height:28, borderRadius:8, backgroundColor:'#FFF4E6',
                      alignItems:'center', justifyContent:'center' },
@@ -1031,4 +1232,5 @@ const s = StyleSheet.create({
   suggestBtn:     { borderRadius:12, overflow:'hidden', alignSelf:'stretch' },
   suggestGrad:    { paddingVertical:13, alignItems:'center' },
   suggestTxt:     { color:'#fff', fontSize:14, fontWeight:'700' },
+
 });

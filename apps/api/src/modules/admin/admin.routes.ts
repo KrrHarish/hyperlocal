@@ -1011,4 +1011,60 @@ export async function adminRoutes(server: FastifyInstance) {
     await db('platform_offers').where({ id }).delete()
     return reply.send({ ok: true })
   })
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // APP CATEGORIES
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  // ── GET /app-categories — public, filtered by lat/lng geo-restrictions ────────
+  server.get('/app-categories', async (request, reply) => {
+    const { lat, lng } = request.query as { lat?: string; lng?: string }
+    const userLat = lat ? parseFloat(lat) : null
+    const userLng = lng ? parseFloat(lng) : null
+
+    const categories = await db('app_categories')
+      .where({ is_active: true })
+      .orderBy('sort_order', 'asc')
+
+    // Filter by geo-restrictions if user location provided
+    const filtered = categories.filter((cat: any) => {
+      if (!cat.geo_restrictions || cat.geo_restrictions.length === 0) return true
+      if (userLat === null || userLng === null) return true  // no location = show all
+      return cat.geo_restrictions.some((zone: any) => {
+        const R = 6371
+        const dLat = (userLat - zone.lat) * Math.PI / 180
+        const dLng = (userLng - zone.lng) * Math.PI / 180
+        const a = Math.sin(dLat/2)**2 +
+          Math.cos(zone.lat * Math.PI/180) * Math.cos(userLat * Math.PI/180) * Math.sin(dLng/2)**2
+        const distKm = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+        return distKm <= zone.radius_km
+      })
+    })
+
+    return reply.send({ categories: filtered })
+  })
+
+  // ── GET /admin/app-categories — list all ─────────────────────────────────────
+  server.get('/admin/app-categories', async (request, reply) => {
+    if (!(await requireAdmin(request, reply))) return
+    const categories = await db('app_categories').orderBy('sort_order', 'asc')
+    return reply.send({ categories })
+  })
+
+  // ── PATCH /admin/app-categories/:id — update ──────────────────────────────────
+  server.patch('/admin/app-categories/:id', async (request, reply) => {
+    if (!(await requireAdmin(request, reply))) return
+    const { id } = request.params as { id: string }
+    const body = request.body as any
+    const patch: any = { updated_at: new Date() }
+    if (body.is_active           !== undefined) patch.is_active           = body.is_active
+    if (body.under_construction  !== undefined) patch.under_construction  = body.under_construction
+    if (body.sort_order          !== undefined) patch.sort_order          = body.sort_order
+    if (body.name                !== undefined) patch.name                = body.name
+    if (body.description         !== undefined) patch.description         = body.description
+    if (body.emoji               !== undefined) patch.emoji               = body.emoji
+    if (body.geo_restrictions    !== undefined) patch.geo_restrictions    = JSON.stringify(body.geo_restrictions)
+    const [cat] = await db('app_categories').where({ id }).update(patch).returning('*')
+    return reply.send({ category: cat })
+  })
 }

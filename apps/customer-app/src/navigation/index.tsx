@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -7,19 +7,21 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../store/AuthContext';
 import { useCart } from '../store/CartContext';
+import { CategoryProvider, AppCategory, useCategory } from '../store/CategoryContext';
 
-import LoginScreen         from '../screens/LoginScreen';
-import OTPScreen           from '../screens/OTPScreen';
-import HomeScreen          from '../screens/HomeScreen';
-import ShopScreen          from '../screens/ShopScreen';
-import CartScreen          from '../screens/CartScreen';
-import OrderTrackingScreen from '../screens/OrderTrackingScreen';
-import OrdersScreen        from '../screens/OrdersScreen';
-import ProfileScreen       from '../screens/ProfileScreen';
-import ProductDetailScreen from '../screens/ProductDetailScreen';
-import SearchScreen        from '../screens/SearchScreen';
-import AddressesScreen     from '../screens/AddressesScreen';
-import ChatScreen          from '../screens/ChatScreen';
+import LoginScreen            from '../screens/LoginScreen';
+import OTPScreen              from '../screens/OTPScreen';
+import CategorySelectScreen   from '../screens/CategorySelectScreen';
+import HomeScreen             from '../screens/HomeScreen';
+import ShopScreen             from '../screens/ShopScreen';
+import CartScreen             from '../screens/CartScreen';
+import OrderTrackingScreen    from '../screens/OrderTrackingScreen';
+import OrdersScreen           from '../screens/OrdersScreen';
+import ProfileScreen          from '../screens/ProfileScreen';
+import ProductDetailScreen    from '../screens/ProductDetailScreen';
+import SearchScreen           from '../screens/SearchScreen';
+import AddressesScreen        from '../screens/AddressesScreen';
+import ChatScreen             from '../screens/ChatScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab   = createBottomTabNavigator();
@@ -47,7 +49,7 @@ function HomeStack() {
       <Stack.Screen name="Cart"          component={CartScreen} />
       <Stack.Screen name="OrderTracking" component={OrderTrackingScreen} />
       <Stack.Screen name="Profile"       component={ProfileScreen} />
-      <Stack.Screen name="ProductDetail"  component={ProductDetailScreen} />
+      <Stack.Screen name="ProductDetail" component={ProductDetailScreen} />
       <Stack.Screen name="Search"        component={SearchScreen} />
       <Stack.Screen name="Addresses"     component={AddressesScreen} />
       <Stack.Screen name="Chat"          component={ChatScreen} />
@@ -56,7 +58,6 @@ function HomeStack() {
 }
 
 // ── ORDERS STACK ────────────────────────────────────────
-// Key fix: OrderTracking is inside this stack so back() goes to OrdersList
 function OrdersStack() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
@@ -64,7 +65,7 @@ function OrdersStack() {
       <Stack.Screen name="OrderTracking" component={OrderTrackingScreen} />
       <Stack.Screen name="Shop"          component={ShopScreen} />
       <Stack.Screen name="Cart"          component={CartScreen} />
-      <Stack.Screen name="ProductDetail"  component={ProductDetailScreen} />
+      <Stack.Screen name="ProductDetail" component={ProductDetailScreen} />
       <Stack.Screen name="Addresses"     component={AddressesScreen} />
     </Stack.Navigator>
   );
@@ -136,13 +137,51 @@ function AuthStack() {
   );
 }
 
-export default function Navigation() {
+// ── ROOT NAVIGATOR — handles category gate ──────────────
+// selectedCategory is NULL on every cold start (force-close + reopen resets JS state).
+// Once the user picks a category the main tabs show. The hamburger in HomeScreen
+// calls setSelectedCategory(null) to pop back to CategorySelect.
+function RootNavigator() {
   const { token, isLoading } = useAuth();
+  const { selectedCategory, setSelectedCategory } = useCategory();
+
   if (isLoading) return null;
+
+  if (!token) {
+    return (
+      <Stack.Navigator screenOptions={{ headerShown: false, animation: 'fade' }}>
+        <Stack.Screen name="Login" component={LoginScreen} />
+        <Stack.Screen name="OTP"   component={OTPScreen} />
+      </Stack.Navigator>
+    );
+  }
+
+  // Logged in but no category selected yet (every cold start)
+  if (!selectedCategory) {
+    return (
+      <Stack.Navigator screenOptions={{ headerShown: false, animation: 'fade' }}>
+        <Stack.Screen name="CategorySelect">
+          {() => (
+            <CategorySelectScreen
+              onSelect={(cat: AppCategory) => setSelectedCategory(cat)}
+            />
+          )}
+        </Stack.Screen>
+      </Stack.Navigator>
+    );
+  }
+
+  // Category selected — show main app
+  return <MainTabs />;
+}
+
+export default function Navigation() {
   return (
-    <NavigationContainer>
-      {token ? <MainTabs /> : <AuthStack />}
-    </NavigationContainer>
+    <CategoryProvider>
+      <NavigationContainer>
+        <RootNavigator />
+      </NavigationContainer>
+    </CategoryProvider>
   );
 }
 
