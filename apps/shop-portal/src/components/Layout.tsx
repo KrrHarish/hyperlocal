@@ -71,12 +71,16 @@ function urlBase64ToUint8Array(base64String: string) {
 }
 
 const NAV = [
-  { to: '/dashboard', icon: '◈',  label: 'Dashboard' },
-  { to: '/orders',    icon: '🔔', label: 'Orders'    },
-  { to: '/catalogue', icon: '📦', label: 'Catalogue' },
-  { to: '/deals',     icon: '🏷️', label: 'Deals'     },
-  { to: '/chat',      icon: '💬', label: 'Messages'  },
+  { to: '/dashboard',  icon: '◈',  label: 'Dashboard'    },
+  { to: '/orders',     icon: '🔔', label: 'Orders'       },
+  { to: '/catalogue',  icon: '📦', label: 'Catalogue'    },
+  { to: '/deals',      icon: '🏷️', label: 'Deals'        },
+  { to: '/chat',       icon: '💬', label: 'Messages'     },
+  { to: '/subscribe',  icon: '💳', label: 'Subscription' },
 ]
+
+const PLAN_COLOR: Record<string,string> = { free:'#6B7280', growth:'#22C55E', pro:'#F59E0B' }
+const PLAN_LABEL: Record<string,string> = { free:'Free', growth:'Growth', pro:'Pro' }
 
 // ── Browser notification helper ────────────────────────────────────
 async function showOrderNotification(newOrders: any[]) {
@@ -111,10 +115,14 @@ async function showOrderNotification(newOrders: any[]) {
 export default function Layout() {
   const { shop, setShop, logout } = useAuth()
   const navigate = useNavigate()
-  const [toggling, setToggling] = useState(false)
-  const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
+  const [toggling, setToggling]           = useState(false)
+  const [toast, setToast]                 = useState<{ msg: string; ok: boolean } | null>(null)
   const [soundEnabled, setSoundEnabled]   = useState(true)
   const [notifEnabled, setNotifEnabled]   = useState<boolean>(() => Notification.permission === 'granted')
+  const [planKey, setPlanKey]             = useState<string>('free')
+  const [isTrial, setIsTrial]             = useState(false)
+  const [trialDaysLeft, setTrialDaysLeft] = useState<number | null>(null)
+  const [trialExpired, setTrialExpired]   = useState(false)
   const pushSubRef      = useRef<PushSubscription | null>(null)
   const soundEnabledRef = useRef(soundEnabled)
   useEffect(() => { soundEnabledRef.current = soundEnabled }, [soundEnabled])
@@ -163,6 +171,42 @@ export default function Layout() {
       destroyed = true
       if (reconnectTimer) clearTimeout(reconnectTimer)
       ws?.close()
+    }
+  }, [shop])
+
+  // Fetch subscription + trial status — runs on mount and every 5 minutes
+  useEffect(() => {
+    let dead = false
+
+    const checkSubscription = () => {
+      if (dead) return
+      api.get('/shop-portal/subscription')
+        .then(({ data: d }) => {
+          if (dead) return
+          if (d.access_blocked) {
+            // Move token to sessionStorage so paywall can still call /subscribe,
+            // then hard-logout so PrivateRoute no longer lets them through.
+            const existing = localStorage.getItem('zuqu_owner_token')
+            if (existing) sessionStorage.setItem('zuqu_subscribe_token', existing)
+            logout()                                      // clears localStorage + AuthContext
+            navigate('/trial-expired', { replace: true }) // redirect to paywall
+            return
+          }
+          if (d.plan_key) setPlanKey(d.plan_key)
+          setIsTrial(!!d.is_trial)
+          setTrialDaysLeft(d.trial_days_left ?? null)
+          setTrialExpired(false)
+        })
+        .catch(() => {})
+    }
+
+    if (!shop) return
+    checkSubscription()                              // immediate check on mount / shop change
+    const interval = setInterval(checkSubscription, 30 * 1000) // re-check every 30 seconds
+
+    return () => {
+      dead = true
+      clearInterval(interval)
     }
   }, [shop])
 
@@ -284,6 +328,61 @@ export default function Layout() {
             </div>
           </div>
         )}
+
+        {/* Trial banner — shown when in trial */}
+        {isTrial && !trialExpired && trialDaysLeft !== null && (
+          <NavLink to="/subscribe" style={{ textDecoration: 'none' }}>
+            <div style={{
+              margin: '10px 12px 0',
+              background: trialDaysLeft <= 3
+                ? 'rgba(239,68,68,0.12)'
+                : trialDaysLeft <= 7
+                  ? 'rgba(245,158,11,0.12)'
+                  : 'rgba(34,197,94,0.08)',
+              border: `1px solid ${trialDaysLeft <= 3 ? 'rgba(239,68,68,0.35)' : trialDaysLeft <= 7 ? 'rgba(245,158,11,0.35)' : 'rgba(34,197,94,0.25)'}`,
+              borderRadius: 10, padding: '9px 12px', cursor: 'pointer',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                <span style={{ fontSize: 10, fontWeight: 800, color: trialDaysLeft <= 3 ? '#f87171' : trialDaysLeft <= 7 ? '#fbbf24' : '#4ade80', textTransform: 'uppercase', letterSpacing: 0.6 }}>
+                  {trialDaysLeft <= 3 ? '⚠️ Trial ending!' : '⚡ Free Trial'}
+                </span>
+                <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.25)' }}>Upgrade →</span>
+              </div>
+              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.55)', lineHeight: 1.4 }}>
+                {trialDaysLeft <= 0
+                  ? 'Trial expired — subscribe to continue'
+                  : trialDaysLeft === 1
+                    ? 'Last day of your free trial'
+                    : `${trialDaysLeft} days remaining`}
+              </div>
+              <div style={{ marginTop: 6, height: 3, borderRadius: 99, background: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
+                <div style={{ height: '100%', borderRadius: 99, width: `${Math.max(4, Math.min(100, (trialDaysLeft / 30) * 100))}%`, background: trialDaysLeft <= 3 ? '#EF4444' : trialDaysLeft <= 7 ? '#F59E0B' : '#22C55E', transition: 'width 0.3s' }} />
+              </div>
+            </div>
+          </NavLink>
+        )}
+
+        {/* Subscription badge */}
+        <div style={{ padding: '10px 12px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+          <NavLink to="/subscribe" style={{ textDecoration: 'none' }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              background: 'rgba(255,255,255,0.06)', borderRadius: 10,
+              padding: '8px 12px', cursor: 'pointer',
+              border: `1px solid ${PLAN_COLOR[planKey]}33`,
+            }}>
+              <div>
+                <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 }}>
+                  {isTrial ? 'Trial Plan' : 'Current Plan'}
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 800, color: PLAN_COLOR[planKey] }}>
+                  💳 {PLAN_LABEL[planKey] ?? planKey}
+                </div>
+              </div>
+              <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>→</span>
+            </div>
+          </NavLink>
+        </div>
 
         {/* Nav */}
         <nav style={{ flex: 1, padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: 2 }}>

@@ -10,6 +10,7 @@ const NAV = [
   { to: '/fleet',     label: 'Fleet Map', icon: '🗺️' },
   { to: '/platform-offers',  label: 'Platform Offers', icon: '🎁' },
   { to: '/app-categories',   label: 'App Categories',  icon: '📱' },
+  { to: '/subscriptions',    label: 'Subscriptions',   icon: '💳' },
 ]
 
 export default function Layout({ children }: { children: React.ReactNode }) {

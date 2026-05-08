@@ -34,7 +34,18 @@ export async function getNearbyShops(_lat: number, _lng: number, _radiusKm = 2, 
   let q = db('shops').where({ is_active: true })
   if (filters.type)     q = q.where({ shop_type: filters.type })
   if (filters.open_now) q = q.where({ is_open: true })
-  return q.select('*').orderBy('name', 'asc')
+
+  // Try featured-aware sort; fall back to simple sort if migration 027 hasn't run yet
+  try {
+    return await q.select('*').orderByRaw(`
+      CASE WHEN is_featured = true AND (featured_until IS NULL OR featured_until > NOW()) THEN 0 ELSE 1 END ASC,
+      featured_sort_order DESC,
+      rating DESC NULLS LAST,
+      name ASC
+    `)
+  } catch {
+    return q.select('*').orderBy([{ column: 'rating', order: 'desc' }, { column: 'name', order: 'asc' }])
+  }
 }
 
 export async function getLateNightShops() {

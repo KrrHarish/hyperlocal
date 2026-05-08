@@ -302,14 +302,22 @@ export default function HomeScreen({ navigation }: any) {
     // Filter by selected app category (from the category-select screen)
     const shopCat = (s.category || '').toLowerCase();
     const shopTags = (s.tags || []).map((t: string) => t.toLowerCase());
+
+    // If shop has no recognised category, show it in all views (don't hide onboarding shops)
+    const allKnownTypes = Object.values(APP_CAT_SHOP_TYPES).flat();
+    const shopHasKnownType = allKnownTypes.includes(shopCat) ||
+      shopTags.some((t: string) => allKnownTypes.includes(t));
+
     const matchAppCat = allowedTypes.length === 0 ||
+      !shopHasKnownType ||           // uncategorised shops visible everywhere
       allowedTypes.includes(shopCat) ||
       shopTags.some((t: string) => allowedTypes.includes(t));
 
     // Additionally filter by the in-screen category chip
     if (category === 'all') return matchSearch && matchAppCat;
     const catLabel = CATEGORIES.find(c => c.id === category)?.label?.toLowerCase() || '';
-    const matchChip = shopCat === category ||
+    const matchChip = !shopHasKnownType ||  // uncategorised shops pass chip filter too
+      shopCat === category ||
       shopTags.some((t: string) => t === category || t === catLabel);
     return matchSearch && matchAppCat && matchChip;
   });

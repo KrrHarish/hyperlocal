@@ -774,6 +774,30 @@ export async function adminRoutes(server: FastifyInstance) {
     return reply.send({ shop: updated })
   })
 
+  // ── PATCH /admin/shops/:id/featured — toggle featured placement ──────────────
+
+  server.patch('/admin/shops/:id/featured', async (request, reply) => {
+    if (!(await requireAdmin(request, reply))) return
+    const { id } = request.params as { id: string }
+    const { is_featured, featured_until, featured_badge, featured_sort_order } = request.body as any
+
+    const shop = await db('shops').where({ id }).first()
+    if (!shop) return reply.status(404).send({ error: 'Shop not found' })
+
+    const [updated] = await db('shops')
+      .where({ id })
+      .update({
+        is_featured:        is_featured ?? false,
+        featured_until:     featured_until ? new Date(featured_until) : null,
+        featured_badge:     featured_badge ?? null,
+        featured_sort_order: featured_sort_order ?? 0,
+        updated_at:         new Date(),
+      })
+      .returning('*')
+
+    return reply.send({ shop: updated })
+  })
+
   // ── PATCH /admin/shops/:id/suspend — toggle shop active status ───────────────
 
   server.patch('/admin/shops/:id/suspend', async (request, reply) => {
@@ -969,20 +993,25 @@ export async function adminRoutes(server: FastifyInstance) {
   // ── POST /admin/platform-offers — create ─────────────────────────────────────
   server.post('/admin/platform-offers', async (request, reply) => {
     if (!(await requireAdmin(request, reply))) return
-    const { title, subtitle, code_label, color, offer_type, value, min_order, valid_to } =
-      request.body as any
+    const { title, subtitle, code_label, color, offer_type, value, min_order, valid_to,
+            shop_contribution, platform_contribution } = request.body as any
     if (!title || !offer_type) {
       return reply.status(400).send({ error: 'title and offer_type are required' })
     }
+    const totalValue = parseFloat(value) || 0
+    const shopContrib     = parseFloat(shop_contribution)     || 0
+    const platformContrib = parseFloat(platform_contribution) ?? totalValue  // default: platform pays all
     const [offer] = await db('platform_offers').insert({
       title,
-      subtitle:   subtitle   || null,
-      code_label: code_label || null,
-      color:      color      || 'orange',
+      subtitle:              subtitle   || null,
+      code_label:            code_label || null,
+      color:                 color      || 'orange',
       offer_type,
-      value:      parseFloat(value)     || 0,
-      min_order:  parseFloat(min_order) || 0,
-      valid_to:   valid_to ? new Date(valid_to) : null,
+      value:                 totalValue,
+      min_order:             parseFloat(min_order) || 0,
+      valid_to:              valid_to ? new Date(valid_to) : null,
+      shop_contribution:     shopContrib,
+      platform_contribution: platformContrib,
     }).returning('*')
     return reply.status(201).send({ offer })
   })
@@ -993,7 +1022,8 @@ export async function adminRoutes(server: FastifyInstance) {
     const { id } = request.params as { id: string }
     const body = request.body as any
     const allowed = ['title', 'subtitle', 'code_label', 'color', 'offer_type',
-                     'value', 'min_order', 'is_active', 'valid_to']
+                     'value', 'min_order', 'is_active', 'valid_to',
+                     'shop_contribution', 'platform_contribution']
     const patch: any = { updated_at: new Date() }
     for (const k of allowed) {
       if (body[k] !== undefined) patch[k] = body[k]
@@ -1066,5 +1096,121 @@ export async function adminRoutes(server: FastifyInstance) {
     if (body.geo_restrictions    !== undefined) patch.geo_restrictions    = JSON.stringify(body.geo_restrictions)
     const [cat] = await db('app_categories').where({ id }).update(patch).returning('*')
     return reply.send({ category: cat })
+  })
+
+  // ─── SUBSCRIPTION PLANS ────────────────────────────────────────────────────
+
+  // GET /subscription-plans  (public — used by shop portal landing page)
+  server.get('/subscription-plans', async (_request, reply) => {
+    const plans = await db('shop_subscription_plans')
+      .where({ is_active: true })
+      .orderBy('sort_order', 'asc')
+    return reply.send({ plans })
+  })
+
+  // GET /admin/subscription-plans  (admin — all plans including inactive)
+  server.get('/admin/subscription-plans', async (request, reply) => {
+    if (!(await requireAdmin(request, reply))) return
+    const plans = await db('shop_subscription_plans').orderBy('sort_order', 'asc')
+    return reply.send({ plans })
+  })
+
+  // PATCH /admin/subscription-plans/:key
+  server.patch('/admin/subscription-plans/:key', async (request, reply) => {
+    if (!(await requireAdmin(request, reply))) return
+    const { key } = request.params as { key: string }
+    const body = request.body as any
+    const allowed = ['name', 'monthly_fee', 'commission_rate', 'is_active', 'description', 'features', 'category_overrides', 'sort_order']
+    const update: Record<string, any> = {}
+    for (const f of allowed) if (body[f] !== undefined) update[f] = body[f]
+    if (Object.keys(update).length === 0) return reply.status(400).send({ error: 'Nothing to update' })
+    update.updated_at = new Date()
+    await db('shop_subscription_plans').where({ key }).update(update)
+    const plan = await db('shop_subscription_plans').where({ key }).first()
+    return reply.send({ plan })
+  })
+
+  // GET /admin/shop-subscriptions  — list all shops with their current plan
+  server.get('/admin/shop-subscriptions', async (request, reply) => {
+    if (!(await requireAdmin(request, reply))) return
+    const rows = await db('shops')
+      .leftJoin('shop_subscriptions', 'shops.id', 'shop_subscriptions.shop_id')
+      .select(
+        'shops.id', 'shops.name', 'shops.category',
+        db.raw("COALESCE(shop_subscriptions.plan_key, 'free') as plan_key"),
+        'shop_subscriptions.status',
+        'shop_subscriptions.started_at',
+        'shop_subscriptions.expires_at',
+        'shop_subscriptions.admin_override',
+        'shop_subscriptions.override_note',
+      )
+      .orderBy('shops.name', 'asc')
+    return reply.send({ subscriptions: rows })
+  })
+
+  // PATCH /admin/shops/:id/subscription  — admin override a shop's plan
+  server.patch('/admin/shops/:id/subscription', async (request, reply) => {
+    if (!(await requireAdmin(request, reply))) return
+    const { id } = request.params as { id: string }
+    const { plan_key, override_note, expires_at } = request.body as { plan_key: string; override_note?: string; expires_at?: string | null }
+    const expiresVal = expires_at ? new Date(expires_at) : null
+    const existing = await db('shop_subscriptions').where({ shop_id: id }).first()
+    if (existing) {
+      await db('shop_subscriptions').where({ shop_id: id }).update({
+        plan_key, admin_override: true, override_note: override_note ?? null,
+        expires_at: expiresVal, status: 'active', updated_at: new Date(),
+      })
+    } else {
+      await db('shop_subscriptions').insert({
+        shop_id: id, plan_key, admin_override: true,
+        override_note: override_note ?? null, expires_at: expiresVal, status: 'active',
+      })
+    }
+    return reply.send({ ok: true })
+  })
+
+  // GET /admin/subscription-revenue  — revenue analytics
+  server.get('/admin/subscription-revenue', { preHandler: [requireAdmin] }, async (_request, reply) => {
+    const rows = await db('shops')
+      .leftJoin('shop_subscriptions', 'shops.id', 'shop_subscriptions.shop_id')
+      .leftJoin('shop_subscription_plans', 'shop_subscription_plans.key',
+        db.raw("COALESCE(shop_subscriptions.plan_key, 'free')"))
+      .select(
+        'shops.category',
+        db.raw("COALESCE(shop_subscriptions.plan_key, 'free') as plan_key"),
+        db.raw("COALESCE(shop_subscription_plans.monthly_fee, 0) as monthly_fee"),
+        db.raw("COALESCE(shop_subscription_plans.commission_rate, 10) as commission_rate"),
+        db.raw("COALESCE(shop_subscriptions.status, 'active') as status"),
+      )
+
+    // Aggregate
+    const byPlan: Record<string, { count: number; revenue: number; commission_rate: number }> = {}
+    const byCategory: Record<string, { count: number; revenue: number }> = {}
+    let totalRevenue = 0
+    let totalShops   = 0
+
+    for (const row of rows) {
+      const fee = parseFloat(row.monthly_fee) || 0
+      const cat = row.category || 'other'
+      const plan = row.plan_key || 'free'
+
+      totalRevenue += fee
+      totalShops++
+
+      if (!byPlan[plan]) byPlan[plan] = { count: 0, revenue: 0, commission_rate: parseFloat(row.commission_rate) }
+      byPlan[plan].count++
+      byPlan[plan].revenue += fee
+
+      if (!byCategory[cat]) byCategory[cat] = { count: 0, revenue: 0 }
+      byCategory[cat].count++
+      byCategory[cat].revenue += fee
+    }
+
+    return reply.send({
+      total_monthly_revenue: totalRevenue,
+      total_shops: totalShops,
+      by_plan: byPlan,
+      by_category: byCategory,
+    })
   })
 }

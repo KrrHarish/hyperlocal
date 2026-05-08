@@ -158,6 +158,7 @@ const emptyForm = () => ({
   title: '', subtitle: '', code_label: '',
   color: 'orange', offer_type: 'percent_off',
   value: '', min_order: '', valid_to: '',
+  shop_contribution: '', platform_contribution: '',
 })
 
 export default function PlatformOffers() {
@@ -198,6 +199,8 @@ export default function PlatformOffers() {
       value: o.value ?? '',
       min_order: o.min_order ?? '',
       valid_to: o.valid_to ? o.valid_to.slice(0, 16) : '',
+      shop_contribution: o.shop_contribution ?? '',
+      platform_contribution: o.platform_contribution ?? '',
     })
     setError('')
     setShowForm(true)
@@ -276,10 +279,11 @@ export default function PlatformOffers() {
         padding:'14px 18px', marginBottom:24, display:'flex', gap:12, alignItems:'flex-start' }}>
         <span style={{ fontSize:20 }}>💡</span>
         <div>
-          <div style={{ fontWeight:700, color:'#4ade80', fontSize:14, marginBottom:4 }}>How platform offers work</div>
+          <div style={{ fontWeight:700, color:'#4ade80', fontSize:14, marginBottom:4 }}>Co-funded platform offers</div>
           <div style={{ fontSize:13, color:'#86efac', lineHeight:'1.6' }}>
-            When a customer uses a platform offer at checkout, the <strong>shop owner receives their full listed price</strong>.
-            Zuqu absorbs the discount cost. Use the <strong>Subsidy Report</strong> below to see how much Zuqu owes each shop.
+            Set a <strong>cost split</strong> when creating an offer — the shop funds part, Zuqu funds the rest.
+            Shops still see the discount applied at checkout; their contribution is deducted from the payout.
+            Default (no split set) = <strong>Zuqu absorbs 100%</strong>. Use splits to make promotions sustainable at scale.
           </div>
         </div>
       </div>
@@ -314,11 +318,45 @@ export default function PlatformOffers() {
               </select>
             </div>
             <div>
-              <label style={labelStyle}>Discount Value {form.offer_type !== 'free_delivery' ? '*' : '(N/A)'}</label>
-              <input style={inputStyle} type="number" min={0} placeholder="e.g. 20"
+              <label style={labelStyle}>Total Discount Value {form.offer_type !== 'free_delivery' ? '*' : '(N/A)'}</label>
+              <input style={inputStyle} type="number" min={0} placeholder="e.g. 30"
                 disabled={form.offer_type === 'free_delivery'}
                 value={form.value} onChange={e => setForm(f => ({ ...f, value: e.target.value }))} />
             </div>
+
+            {/* Co-funding split */}
+            <div style={{ gridColumn:'1/-1', background:'#0d1a0d', border:'1px solid #1a3a1a', borderRadius:10, padding:'14px 16px' }}>
+              <div style={{ fontSize:12, color:'#4ade80', fontWeight:700, marginBottom:10 }}>
+                💰 Cost Split — Who funds this discount?
+              </div>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+                <div>
+                  <label style={{ ...labelStyle, color:'#22C55E' }}>Platform pays (₹ or %)</label>
+                  <input style={inputStyle} type="number" min={0}
+                    placeholder={`Default: full ₹${form.value || '0'}`}
+                    value={form.platform_contribution}
+                    onChange={e => setForm(f => ({ ...f, platform_contribution: e.target.value }))} />
+                  <div style={{ fontSize:10, color:'#444', marginTop:4 }}>Leave blank = Zuqu absorbs 100%</div>
+                </div>
+                <div>
+                  <label style={{ ...labelStyle, color:'#F59E0B' }}>Shop pays (₹)</label>
+                  <input style={inputStyle} type="number" min={0}
+                    placeholder="0 = shop pays nothing"
+                    value={form.shop_contribution}
+                    onChange={e => setForm(f => ({ ...f, shop_contribution: e.target.value }))} />
+                  <div style={{ fontSize:10, color:'#444', marginTop:4 }}>Deducted from shop payout per order</div>
+                </div>
+              </div>
+              {(parseFloat(form.platform_contribution as any) || 0) + (parseFloat(form.shop_contribution as any) || 0) > 0 && (
+                <div style={{ marginTop:10, fontSize:12, color:'#86efac' }}>
+                  Total: ₹{((parseFloat(form.platform_contribution as any)||0) + (parseFloat(form.shop_contribution as any)||0)).toFixed(2)} per order
+                  {parseFloat(form.value as any) > 0 && ((parseFloat(form.platform_contribution as any)||0) + (parseFloat(form.shop_contribution as any)||0)) !== parseFloat(form.value as any) && (
+                    <span style={{ color:'#f87171', marginLeft:8 }}>⚠ Doesn't match discount value (₹{form.value})</span>
+                  )}
+                </div>
+              )}
+            </div>
+
             <div>
               <label style={labelStyle}>Card Colour</label>
               <select style={inputStyle} value={form.color}

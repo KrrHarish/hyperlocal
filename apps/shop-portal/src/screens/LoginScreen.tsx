@@ -24,8 +24,16 @@ export default function LoginScreen() {
         username: username.trim().toLowerCase(),
         password,
       })
-      await login(res.data.token)
-      navigate('/dashboard', { replace: true })
+      if (res.data.access_blocked) {
+        // Expired — do NOT call login() so the user stays logged OUT of the portal.
+        // Stash token in sessionStorage only so TrialExpiredScreen can call /subscribe.
+        sessionStorage.setItem('zuqu_subscribe_token', res.data.token)
+        navigate('/trial-expired', { replace: true })
+      } else {
+        // Active subscription — normal login
+        await login(res.data.token)
+        navigate('/dashboard', { replace: true })
+      }
     } catch (e: any) {
       setError(e?.response?.data?.error ?? 'Login failed. Check your credentials.')
     } finally {
@@ -131,6 +139,11 @@ export default function LoginScreen() {
 
         <p style={{ textAlign: 'center', fontSize: 12, color: '#9ca3af', marginTop: 20 }}>
           Credentials are provided by your administrator
+        </p>
+        <p style={{ textAlign: 'center', marginTop: 12 }}>
+          <button onClick={() => navigate('/plans')} style={{ background:'none', border:'none', color:'#065f46', fontWeight:700, fontSize:13, cursor:'pointer', textDecoration:'underline' }}>
+            View pricing plans →
+          </button>
         </p>
       </div>
     </div>

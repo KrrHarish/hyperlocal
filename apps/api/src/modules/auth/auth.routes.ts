@@ -75,11 +75,45 @@ export async function authRoutes(server: FastifyInstance) {
     const valid = await bcrypt.compare(password, cred.password_hash)
     if (!valid) return reply.status(401).send({ error: 'Invalid username or password' })
 
+    // ── Subscription gate ──────────────────────────────────────────────
+    let sub = await db('shop_subscriptions').where({ shop_id: cred.shop_id }).first()
+
+    // First-ever login → auto-start 30-day free trial
+    if (!sub) {
+      const trialEnds = new Date()
+      trialEnds.setDate(trialEnds.getDate() + 30)
+      await db('shop_subscriptions').insert({
+        shop_id:    cred.shop_id,
+        plan_key:   'free',
+        status:     'trial',
+        started_at: new Date(),
+        expires_at: trialEnds,
+      })
+      // Re-fetch so we have the fresh row
+      sub = await db('shop_subscriptions').where({ shop_id: cred.shop_id }).first()
+    }
+
+    // Check if subscription/trial is expired
+    const now        = new Date()
+    const expiresAt  = sub?.expires_at ? new Date(sub.expires_at) : null
+    const isExpired  = expiresAt !== null && expiresAt < now
+    const isTrial    = sub?.status === 'trial'
+    const accessBlocked = isExpired  // expired trial OR expired paid plan
+
+    // Issue the token regardless — frontend needs it to subscribe
     const token = server.jwt.sign(
       { id: cred.shop_id, role: 'shop', username: cred.username },
       { expiresIn: '30d' }
     )
-    return reply.send({ token, shop_id: cred.shop_id, shop_name: cred.shop_name })
+
+    // Return access_blocked flag so frontend redirects to paywall immediately
+    return reply.send({
+      token,
+      shop_id:        cred.shop_id,
+      shop_name:      cred.shop_name,
+      access_blocked: accessBlocked,
+      reason:         accessBlocked ? (isTrial ? 'trial_expired' : 'subscription_expired') : null,
+    })
   })
 
 }

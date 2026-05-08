@@ -13,6 +13,20 @@ export async function shopRoutes(server: FastifyInstance) {
     }
   }
 
+  // Helper — require shop credential JWT and set request.shopId
+  async function shopAuth(request: any, reply: any) {
+    try {
+      await request.jwtVerify()
+      const user = request.user as { id: string; role?: string }
+      if (user.role !== 'shop') {
+        return reply.status(403).send({ error: 'Forbidden' })
+      }
+      request.shopId = user.id
+    } catch {
+      return reply.status(401).send({ error: 'Unauthorized' })
+    }
+  }
+
   // GET /shops/nearby?lat=&lng=&radius=&type=home_producer&open_now=true — PUBLIC
   server.get('/shops/nearby', async (request, reply) => {
     const { lat, lng, radius, type, open_now } = request.query as {
@@ -118,6 +132,60 @@ export async function shopRoutes(server: FastifyInstance) {
       .returning('*')
 
     return reply.send({ message: 'Shop status updated', shop: updated })
+  })
+
+  // GET /shop-portal/subscription  — get current shop's subscription + trial status
+  server.get('/shop-portal/subscription', { preHandler: [shopAuth] }, async (request, reply) => {
+    const shopId = (request as any).shopId
+    const sub = await db('shop_subscriptions').where({ shop_id: shopId }).first()
+    const planKey = sub?.plan_key ?? 'free'
+    const plan = await db('shop_subscription_plans').where({ key: planKey }).first()
+
+    const isTrial = sub?.status === 'trial'
+    const now = new Date()
+    const expiresAt: Date | null = sub?.expires_at ? new Date(sub.expires_at) : null
+
+    // Blocked when: trial expired, OR paid plan has an expiry date that passed
+    const isExpired = expiresAt !== null && expiresAt < now
+    const trialDaysLeft = expiresAt
+      ? Math.ceil((expiresAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+      : null
+
+    return reply.send({
+      subscription: sub ?? null,
+      plan: plan ?? null,
+      plan_key: planKey,
+      is_trial: isTrial,
+      trial_expired: isTrial && isExpired,
+      trial_days_left: isTrial ? trialDaysLeft : null,
+      trial_ends_at: isTrial ? sub?.expires_at : null,
+      // Generic flag — true whenever ANY subscription (trial or paid) has lapsed
+      access_blocked: isExpired,
+      expires_at: sub?.expires_at ?? null,
+    })
+  })
+
+  // POST /shop-portal/subscribe  — shop selects a plan
+  server.post('/shop-portal/subscribe', { preHandler: [shopAuth] }, async (request, reply) => {
+    const shopId = (request as any).shopId
+    const { plan_key } = request.body as { plan_key: string }
+    const plan = await db('shop_subscription_plans').where({ key: plan_key, is_active: true }).first()
+    if (!plan) return reply.status(400).send({ error: 'Invalid plan' })
+    const existing = await db('shop_subscriptions').where({ shop_id: shopId }).first()
+    if (existing && existing.admin_override) {
+      return reply.status(403).send({ error: 'Subscription managed by admin' })
+    }
+    const expires_at = plan.monthly_fee > 0
+      ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+      : null
+    if (existing) {
+      await db('shop_subscriptions').where({ shop_id: shopId }).update({
+        plan_key, status: 'active', started_at: new Date(), expires_at, updated_at: new Date(),
+      })
+    } else {
+      await db('shop_subscriptions').insert({ shop_id: shopId, plan_key, status: 'active', expires_at })
+    }
+    return reply.send({ ok: true, plan_key })
   })
 
 }

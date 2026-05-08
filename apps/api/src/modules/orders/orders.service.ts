@@ -4,8 +4,9 @@ import { sendPushToCustomer } from '../../shared/expoPush'
 import { broadcast } from '../../shared/realtime'
 
 // Calculate delivery fee with time-based surge pricing
+// Thresholds: <₹150 = ₹49 (discourages tiny orders), ₹150–₹399 = ₹25, ₹400+ = free
 async function calculateDeliveryFee(orderTotal: number): Promise<number> {
-  const base = orderTotal >= 500 ? 0 : orderTotal >= 200 ? 25 : 40
+  const base = orderTotal >= 400 ? 0 : orderTotal >= 150 ? 25 : 49
   if (base === 0) return 0 // free delivery stays free
 
   const hour = new Date().getHours() // local time (IST when deployed in India)
@@ -101,17 +102,55 @@ export async function placeOrder(customerId: string, data: {
     }
   }
 
-  // Auto-apply best shop deal if no promo code used
+  // Auto-apply best shop deal (stacks with platform offers below)
   let dealId: string | null = null
   let dealTitle: string | null = null
+  let shopDealDiscount = 0
   if (!discountAmount) {
+    // Only auto-apply shop deal when no promo code was used
     try {
       const { applyBestDeal } = await import('../deals/deals.routes')
       const dealResult = await applyBestDeal(data.shop_id, subtotal)
       if (dealResult.discount > 0) {
-        discountAmount = dealResult.discount
-        dealId        = dealResult.dealId
-        dealTitle     = dealResult.dealTitle
+        shopDealDiscount = dealResult.discount
+        discountAmount  += shopDealDiscount
+        dealId           = dealResult.dealId
+        dealTitle        = dealResult.dealTitle
+      }
+    } catch {}
+  }
+
+  // Apply best platform-wide offer on top of any shop deal (they stack)
+  let platformDiscount = 0
+  let platformTitle: string | null = null
+  if (!data.promo_code) {
+    // Promo codes are exclusive; platform offers only stack with shop deals
+    try {
+      const now = new Date()
+      const platformOffers = await db('platform_offers')
+        .where({ is_active: true })
+        .where('valid_from', '<=', now)
+        .where(function () {
+          this.whereNull('valid_to').orWhere('valid_to', '>=', now)
+        })
+        .where('min_order', '<=', subtotal)
+      for (const offer of platformOffers) {
+        const val = parseFloat(offer.value)
+        let disc = (offer.offer_type === 'percent' || offer.offer_type === 'percent_off')
+          ? (subtotal * val) / 100
+          : val
+        if (offer.max_discount) disc = Math.min(disc, parseFloat(offer.max_discount))
+        disc = Math.min(disc, subtotal)
+        disc = Math.round(disc * 100) / 100
+        if (disc > platformDiscount) {
+          platformDiscount = disc
+          platformTitle    = offer.title
+        }
+      }
+      if (platformDiscount > 0) {
+        discountAmount += platformDiscount
+        // Combine labels: "Testing + Admin Portal Offer" or just the platform title
+        dealTitle = [dealTitle, platformTitle].filter(Boolean).join(' + ')
       }
     } catch {}
   }
